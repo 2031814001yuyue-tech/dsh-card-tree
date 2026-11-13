@@ -1,6 +1,6 @@
 {
   "name": "dsh-card-tree",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "license": "MIT",
   "type": "module",
   "description": "Explore-style card-tree conversations for the DSH Web UI.",
@@ -44,6 +44,7 @@
     "scripts/verify.mjs",
     "docs/ARCHITECTURE.md",
     "docs/USAGE.md",
+    "docs/TUTORIAL.md",
     "docs/preview.png",
     "scripts/install.ps1"
   ],

@@ -144,6 +144,16 @@ window.__ModuleLoader__.load({
         undoDone: '已恢复项目',
         contextLabel: '上下文',
         contextFolded: '已折叠',
+        helpOpen: '使用提示',
+        helpTitle: '30 秒上手',
+        helpLead: '每个项目是一棵卡片树：问题从根往下长，分叉各成一线；全览里还能手动摆位置、换父级、加引用。',
+        helpItem1: '选一张卡片，在下面输入后按 Enter —— 默认会在它下面长出一层（深入）。',
+        helpItem2: '输入框左下角的胶囊可以换成：追问（同一张卡里接着问，不新增节点）、发散（同层另起一线）、独立（一张不连树的卡）。',
+        helpItem3: '卡片动作里的「重答 ▾」还藏着一个「分支重答」：保留旧答案，从同一个问题另开一支。',
+        helpItem4: '顶栏「全览」进结构图：拖节点摆位置、拖 ↗ 改父级、拖 ⇢ 建引用（虚线，点线可删）、「自动排列」还原。',
+        helpItem5: '数据只存在本机 ~/.dsh/card-tree/；用「⋯ → 导出项目 JSON」可以备份或换机。',
+        helpKeys: 'Enter 发送 · Ctrl / ⌘ + Enter 换行 · Esc 关闭浮层',
+        helpStart: '开始使用',
       },
       en: {
         newProject: 'New project',
@@ -267,6 +277,16 @@ window.__ModuleLoader__.load({
         undoDone: 'Project restored',
         contextLabel: 'Context',
         contextFolded: 'folded',
+        helpOpen: 'How to use',
+        helpTitle: 'Up and running in 30 seconds',
+        helpLead: 'Every project is a card tree: questions grow downward from a root, each fork becomes its own line, and the overview lets you rearrange nodes, re-hang them and add references.',
+        helpItem1: 'Pick a card, type below and press Enter — by default a new level grows under it (Deepen).',
+        helpItem2: 'The capsule in the composer switches direction: Follow up (keep asking inside this card, no new node), Diverge (a new line at the same level), Standalone (a card not connected to the tree).',
+        helpItem3: 'The “Retry ▾” menu on a card hides Branch answer: keep the current answer and open a sibling card from the same question.',
+        helpItem4: '“Overview” in the top bar opens the structure: drag nodes to place them, drag ↗ to re-hang, drag ⇢ to reference (dashed edge, click it to drop), “Auto arrange” resets.',
+        helpItem5: 'Everything lives on this machine under ~/.dsh/card-tree/; “⋯ → Export project as JSON” backs it up or moves it.',
+        helpKeys: 'Enter to send · Ctrl / ⌘ + Enter for a new line · Esc closes overlays',
+        helpStart: 'Start',
       },
     };
 
@@ -352,6 +372,24 @@ window.__ModuleLoader__.load({
     function writeTreeWidth(width) {
       try {
         window.localStorage.setItem(TREE_WIDTH_KEY, String(clampTreeWidth(width)));
+      } catch (error) {
+        /* localStorage is optional */
+      }
+    }
+
+    const HELP_SEEN_KEY = 'dsh-card-tree.help-seen';
+
+    function readHelpSeen() {
+      try {
+        return window.localStorage.getItem(HELP_SEEN_KEY) === '1';
+      } catch (error) {
+        return true;
+      }
+    }
+
+    function writeHelpSeen() {
+      try {
+        window.localStorage.setItem(HELP_SEEN_KEY, '1');
       } catch (error) {
         /* localStorage is optional */
       }
@@ -1583,6 +1621,13 @@ window.__ModuleLoader__.load({
 .ct-modal-hint{font-size:11.5px;color:var(--dsw-alias-label-secondary);margin:0}
 .ct-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
 .ct-btn--danger{color:var(--dsw-alias-state-error-primary);box-shadow:inset 0 0 0 1px var(--dsw-alias-state-error-primary)}
+.ct-help{width:min(520px,calc(100vw - 40px));max-height:calc(100vh - 80px);overflow:auto}
+.ct-help-lead{margin:0;font-size:12.5px;line-height:1.7;color:var(--dsw-alias-label-secondary)}
+.ct-help-list{margin:2px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:8px;font-size:12.5px;line-height:1.7;color:var(--dsw-alias-label-primary)}
+.ct-help-list li::marker{color:var(--dsw-alias-brand-primary)}
+.ct-help-keys{margin:4px 0 0;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:1.6}
+.ct-linkbtn{align-self:center;margin-top:2px;padding:2px 4px;border:0;background:none;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.ct-linkbtn:hover{color:var(--dsw-alias-brand-primary)}
 .ct-node-mode{font-size:10.5px;line-height:1.2;color:var(--dsw-alias-label-secondary)}
 .ct-node-text{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.42;word-break:break-word}
 .ct-tip{position:absolute;z-index:9;width:296px;max-width:calc(100% - 16px);padding:9px 11px;border-radius:10px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-overlay);box-shadow:0 12px 30px rgba(0,0,0,.32);pointer-events:none;display:flex;flex-direction:column;gap:3px}
@@ -3359,6 +3404,7 @@ window.__ModuleLoader__.load({
       const rootRef = React.useRef(null);
       const [doomed, setDoomed] = React.useState(null);
       const [deletedProject, setDeletedProject] = React.useState(null);
+      const [help, setHelp] = React.useState(() => !readHelpSeen());
       const importRef = React.useRef(null);
       React.useEffect(() => {
         store.load();
@@ -3413,6 +3459,10 @@ window.__ModuleLoader__.load({
         const onKeyDown = (event) => {
           if (event.key !== 'Escape') return;
           const live = store.get();
+          if (help) {
+            closeHelp();
+            return;
+          }
           if (doomed) {
             setDoomed(null);
             return;
@@ -3434,7 +3484,7 @@ window.__ModuleLoader__.load({
         };
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
-      }, [doomed]);
+      }, [doomed, help]);
 
       function flushProjectSaveQuiet() {
         try {
@@ -3442,6 +3492,11 @@ window.__ModuleLoader__.load({
         } catch (error) {
           void error;
         }
+      }
+
+      function closeHelp() {
+        setHelp(false);
+        writeHelpSeen();
       }
 
       const rootClass = [
@@ -3691,6 +3746,11 @@ window.__ModuleLoader__.load({
               GlyphPlus(14),
               strings.newProject,
             ),
+            h(
+              'button',
+              { type: 'button', className: 'ct-linkbtn', onClick: () => setHelp(true) },
+              strings.helpOpen,
+            ),
           )
         : cards.length === 0
           ? h(
@@ -3699,6 +3759,11 @@ window.__ModuleLoader__.load({
               h('div', { className: 'ct-empty-glyph' }, GlyphTree(34)),
               h('h3', null, strings.emptyStartTitle),
               h('p', null, strings.emptyCardsHint),
+              h(
+                'button',
+                { type: 'button', className: 'ct-linkbtn', onClick: () => setHelp(true) },
+                strings.helpOpen,
+              ),
             )
           : h('div', { className: 'ct-empty ct-empty--quiet' }, h('p', null, strings.selectHint));
 
@@ -3782,6 +3847,17 @@ window.__ModuleLoader__.load({
                 state.compactPane === 'tree' ? strings.card : strings.tree,
               )
             : null,
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'ct-iconbtn ct-iconbtn--sm',
+              title: strings.helpOpen,
+              'aria-label': strings.helpOpen,
+              onClick: () => setHelp(true),
+            },
+            '?',
+          ),
           h(Menu, {
             className: 'ct-iconbtn ct-iconbtn--sm',
             glyph: '⋯',
@@ -3827,6 +3903,45 @@ window.__ModuleLoader__.load({
                 'button',
                 { type: 'button', className: 'ct-btn ct-btn--sm', onClick: () => store.patch({ notice: null }) },
                 strings.dismiss,
+              ),
+            )
+          : null,
+        help
+          ? h(
+              'div',
+              { className: 'ct-modal-backdrop', onClick: closeHelp },
+              h(
+                'div',
+                {
+                  className: 'ct-modal ct-help',
+                  role: 'dialog',
+                  'aria-modal': 'true',
+                  'aria-label': strings.helpTitle,
+                  onClick: (event) => event.stopPropagation(),
+                },
+                h('h3', { className: 'ct-modal-title' }, strings.helpTitle),
+                h('p', { className: 'ct-help-lead' }, strings.helpLead),
+                h(
+                  'ol',
+                  { className: 'ct-help-list' },
+                  [
+                    strings.helpItem1,
+                    strings.helpItem2,
+                    strings.helpItem3,
+                    strings.helpItem4,
+                    strings.helpItem5,
+                  ].map((line, index) => h('li', { key: String(index) }, line)),
+                ),
+                h('p', { className: 'ct-help-keys' }, strings.helpKeys),
+                h(
+                  'div',
+                  { className: 'ct-modal-actions' },
+                  h(
+                    'button',
+                    { type: 'button', className: 'ct-btn ct-btn--primary', onClick: closeHelp },
+                    strings.helpStart,
+                  ),
+                ),
               ),
             )
           : null,
