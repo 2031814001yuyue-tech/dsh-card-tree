@@ -4222,14 +4222,21 @@ window.__ModuleLoader__.load({
       }
       // Record seats the running Harness no longer declares, so the panel can say
       // "this build expects a different DSH" instead of silently staying blank.
-      const missingSeats = [];
+      // Seats owned by other entries can be declared after this plugin applies
+      // (the sidebar and the conversation mount later in the boot sequence), so a
+      // seat only counts as missing once a short grace period has passed.
+      const pendingSeats = new Set();
+      const seatTimers = [];
+      function flushSeatIssues() {
+        store.setSeatIssues(Array.from(pendingSeats));
+      }
       function registerSeat(name, options, component) {
-        let registered = false;
+        pendingSeats.add(name);
         const dispose = ctx.slots.inject(name, () => {
-          registered = true;
+          pendingSeats.delete(name);
+          flushSeatIssues();
           return ctx.slots.register(Object.assign({ name }, options), component);
         });
-        if (!registered) missingSeats.push(name);
         return dispose;
       }
       const disposers = [
@@ -4241,8 +4248,20 @@ window.__ModuleLoader__.load({
           TreeComposer,
         ),
       ];
-      store.setSeatIssues(missingSeats);
+      // Re-evaluate after the layout settles, and whenever the slot tree changes.
+      for (const delay of [0, 120, 500, 1500, 4000]) {
+        seatTimers.push(setTimeout(flushSeatIssues, delay));
+      }
+      try {
+        if (typeof ctx.on === 'function') {
+          const off = ctx.on('slots/changed', () => flushSeatIssues());
+          if (typeof off === 'function') disposers.push(off);
+        }
+      } catch (error) {
+        /* this build does not publish slot changes as an event */
+      }
       return () => {
+        for (const timer of seatTimers) clearTimeout(timer);
         for (const dispose of disposers) {
           try {
             if (typeof dispose === 'function') dispose();
