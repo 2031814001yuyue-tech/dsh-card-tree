@@ -1,0 +1,49 @@
+{
+  "name": "dsh-card-tree",
+  "version": "0.8.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "Explore-style card-tree conversations for the DSH Web UI.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/2031814001yuyue-tech/dsh-card-tree.git"
+  },
+  "scripts": {
+    "check": "node scripts/verify.mjs"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE",
+    "INSTALL.md",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "scripts/verify.mjs",
+    "docs/ARCHITECTURE.md",
+    "docs/USAGE.md",
+    "docs/preview.png",
+    "scripts/install.ps1"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}
