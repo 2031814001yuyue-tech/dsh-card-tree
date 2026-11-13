@@ -47,7 +47,8 @@
     "docs/TUTORIAL.md",
     "docs/preview.png",
     "scripts/install.ps1",
-    "docs/preview-overview.png"
+    "docs/preview-overview.png",
+    "screenshots.json"
   ],
   "dsh": {
     "bundle": {
