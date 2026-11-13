@@ -88,11 +88,3 @@ node scripts/verify.mjs      # 语法 + 元数据 + i18n/CSS 审计 + 宿主纯�
 
 [MIT](LICENSE) © 2026 Card Tree contributors
 
-## 公开前还差什么（TODO）
-
-- [x] LICENSE、去 `private: true`、包名去掉 `@local/`
-- [x] 界面示意图（`docs/preview.png`、`docs/preview-overview.png`）
-- [x] 写明实测的 DSH 版本（0.2.2-rc.1）
-- [ ] 英文 README（或至少英文简介）
-- [x] CHANGELOG 与版本 tag
-- [ ] 真机截图替换现在的示意样张（Electron 窗口在 Windows 高 DPI 下不好截，先用样式表渲染的样张）
