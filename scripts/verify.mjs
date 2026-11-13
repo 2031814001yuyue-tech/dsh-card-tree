@@ -89,6 +89,7 @@ check('shipped docs', () => {
     'docs/USAGE.md',
     'docs/TUTORIAL.md',
     'docs/preview.png',
+    'docs/preview-overview.png',
     'scripts/install.ps1',
   ]) {
     assert(existsSync(join(root, entry)), entry + ' missing');
@@ -98,8 +99,9 @@ check('shipped docs', () => {
   assert(pkg.files.includes('docs/USAGE.md'), 'files must ship docs/USAGE.md');
   assert(pkg.files.includes('docs/TUTORIAL.md'), 'files must ship docs/TUTORIAL.md');
   assert(pkg.files.includes('docs/preview.png'), 'files must ship docs/preview.png');
+  assert(pkg.files.includes('docs/preview-overview.png'), 'files must ship docs/preview-overview.png');
   assert(pkg.files.includes('scripts/install.ps1'), 'files must ship scripts/install.ps1');
-  return 'INSTALL.md + LICENSE + USAGE.md + preview.png + install.ps1';
+  return 'INSTALL.md + LICENSE + USAGE.md + previews + install.ps1';
 });
 
 check('generic sources', () => {

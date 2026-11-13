@@ -46,7 +46,8 @@
     "docs/USAGE.md",
     "docs/TUTORIAL.md",
     "docs/preview.png",
-    "scripts/install.ps1"
+    "scripts/install.ps1",
+    "docs/preview-overview.png"
   ],
   "dsh": {
     "bundle": {

@@ -56,6 +56,10 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 | 删节点/分支 | 悬停 → ×，确认弹层会写清删几张（子树一起） |
 | 自动排列 | 提示行右侧「自动排列」 |
 
+![全览示意](docs/preview-overview.png)
+
+> 全览示意（样式表渲染的静态样张）：同一棵树的结构视图——实线是父子关系（深入 / 发散 / 分支），右侧两张「独立」卡片之间有一条虚线引用；悬停节点时右上角出现 ↗ 改父级、⇢ 建引用、× 删除。
+
 悬停节点有气泡预览，点节点直接进入该卡片并关闭全览。回答按 Markdown 渲染（转义后再拼标签，模型输出不会执行 HTML）。
 
 更多细节（界面、附件类型表、工具白名单、上下文预算、数据与备份手动恢复、HTTP/SSE 接口）见 **[docs/USAGE.md](docs/USAGE.md)**。
@@ -87,8 +91,8 @@ node scripts/verify.mjs      # 语法 + 元数据 + i18n/CSS 审计 + 宿主纯�
 ## 公开前还差什么（TODO）
 
 - [x] LICENSE、去 `private: true`、包名去掉 `@local/`
-- [x] 界面示意图（`docs/preview.png`）
+- [x] 界面示意图（`docs/preview.png`、`docs/preview-overview.png`）
 - [x] 写明实测的 DSH 版本（0.2.2-rc.1）
 - [ ] 英文 README（或至少英文简介）
-- [ ] CHANGELOG 与版本 tag
+- [x] CHANGELOG 与版本 tag
 - [ ] 真机截图替换现在的示意样张（Electron 窗口在 Windows 高 DPI 下不好截，先用样式表渲染的样张）
