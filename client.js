@@ -134,6 +134,9 @@ window.__ModuleLoader__.load({
         searchPlaceholder: '搜索卡片',
         exportLabel: '导出项目 JSON',
         importLabel: '导入项目 JSON',
+        autoTitle: '回答后自动起标题',
+        backfillTitles: '给还没有标题的卡片补标题',
+        backfillDone: '已补标题：',
         importFailed: '导入失败：',
         compatTitle: '运行环境不完整：',
         compatMissingSeats: '缺少界面座位',
@@ -269,6 +272,9 @@ window.__ModuleLoader__.load({
         searchPlaceholder: 'Search cards',
         exportLabel: 'Export project as JSON',
         importLabel: 'Import a project JSON',
+        autoTitle: 'Name cards from their answers',
+        backfillTitles: 'Name cards that still have none',
+        backfillDone: 'Cards named:',
         importFailed: 'Import failed: ',
         compatTitle: 'Incomplete runtime: ',
         compatMissingSeats: 'missing seats',
@@ -461,6 +467,7 @@ window.__ModuleLoader__.load({
         mode: readMode(),
         attachments: [],
         notice: null,
+        autoTitle: true,
         systemOpen: false,
         compact: false,
         compactPane: 'tree',
@@ -532,6 +539,7 @@ window.__ModuleLoader__.load({
           phase: 'ready',
           data,
           model: payload.model || null,
+          autoTitle: payload.autoTitle !== false,
           error: null,
           selectedCardId: stillThere ? state.selectedCardId : null,
         });
@@ -845,6 +853,8 @@ window.__ModuleLoader__.load({
                       },
                       project.id,
                     );
+                    /* The answer is what the card is really about: let it name itself. */
+                    refreshTitle(project.id, cardId);
                   }
                 } else if (event.type === 'aborted') {
                   finished = true;
@@ -1130,6 +1140,27 @@ window.__ModuleLoader__.load({
       }
 
       /** Pick the model new cards in this project use (falls back to the global pick). */
+      /**
+       * Let the Host name a card from its answer, so the list reads like a
+       * contents page instead of a pile of opening questions. Best effort.
+       */
+      async function refreshTitle(projectId, cardId, force) {
+        if (!state.autoTitle && !force) return;
+        try {
+          const payload = await call('/title', { projectId, cardId });
+          applySnapshot(payload);
+          return payload.title || '';
+        } catch (error) {
+          /* naming is a nicety; never surface it as a failure */
+          return '';
+        }
+      }
+
+      async function setAutoTitle(enabled) {
+        const payload = await call('/autoTitle', { enabled: Boolean(enabled) });
+        applySnapshot(payload);
+      }
+
       async function setModel(choice) {
         const project = activeProject();
         const body = choice
@@ -1316,6 +1347,8 @@ window.__ModuleLoader__.load({
         askIn,
         loadModels,
         setModel,
+        refreshTitle,
+        setAutoTitle,
         loadHealth,
         setSeatIssues,
         loadEfforts,
@@ -2172,6 +2205,9 @@ window.__ModuleLoader__.load({
     }
 
     function titleOf(card) {
+      /* A model-written name wins; fall back to the opening question. */
+      const named = String(card.title || '').trim();
+      if (named) return named;
       const first = String(card.prompt || '').split('\n')[0].trim();
       if (!first) return t().rootCard;
       return first.length > 60 ? first.slice(0, 60) + '…' : first;
@@ -3745,6 +3781,12 @@ window.__ModuleLoader__.load({
       const moreItems = project
         ? [
             { label: strings.projectSystem, onClick: () => store.patch({ systemOpen: !state.systemOpen }) },
+            {
+              label: strings.autoTitle,
+              checked: state.autoTitle !== false,
+              onClick: () => store.setAutoTitle(state.autoTitle === false),
+            },
+            { label: strings.backfillTitles, onClick: backfillTitles },
             { separator: true },
             { label: strings.exportLabel, onClick: exportProject },
             { label: strings.importLabel, onClick: () => importRef.current && importRef.current.click() },
@@ -3772,6 +3814,24 @@ window.__ModuleLoader__.load({
             { label: strings.newProject, onClick: newProject },
             { label: strings.importLabel, onClick: () => importRef.current && importRef.current.click() },
           ];
+
+      /** Give the cards that were answered before this feature existed a name too. */
+      async function backfillTitles() {
+        if (!project) return;
+        const targets = project.cards.filter(
+          (card) => String(card.answer || '').trim() && !String(card.title || '').trim(),
+        );
+        if (targets.length === 0) {
+          store.patch({ notice: strings.backfillDone + ' 0' });
+          return;
+        }
+        let renamed = 0;
+        for (const card of targets) {
+          const title = await store.refreshTitle(project.id, card.id, true);
+          if (title) renamed += 1;
+        }
+        store.patch({ notice: strings.backfillDone + ' ' + renamed });
+      }
 
       function exportProject() {
         if (!project) return;

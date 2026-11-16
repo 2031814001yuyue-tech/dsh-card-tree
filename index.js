@@ -264,7 +264,14 @@ function stateFilePath() {
 }
 
 function emptyState() {
-  return { version: STATE_VERSION, activeProjectId: null, projects: [], sessions: {}, model: null };
+  return {
+    version: STATE_VERSION,
+    activeProjectId: null,
+    projects: [],
+    sessions: {},
+    model: null,
+    autoTitle: true,
+  };
 }
 
 function nowIso() {
@@ -304,6 +311,7 @@ function loadState() {
     if (!Array.isArray(parsed.projects)) parsed.projects = [];
     parsed.version = STATE_VERSION;
     parsed.revision = Number(parsed.revision) || 0;
+    if (typeof parsed.autoTitle !== 'boolean') parsed.autoTitle = true;
     // sessionId -> projectId bindings for sessions that run in tree mode.
     if (!parsed.sessions || typeof parsed.sessions !== 'object' || Array.isArray(parsed.sessions)) {
       parsed.sessions = {};
@@ -328,6 +336,7 @@ function loadState() {
         if (!Array.isArray(card.followUps)) card.followUps = [];
         // Dashed references survive a reload as plain id lists.
         if (!Array.isArray(card.refs)) card.refs = [];
+        if (typeof card.title !== 'string') card.title = '';
         if (typeof card.reasoning !== 'string') card.reasoning = '';
         for (const followUp of card.followUps) {
           if (typeof followUp.reasoning !== 'string') followUp.reasoning = '';
@@ -1059,14 +1068,15 @@ function serviceHealth(ctx) {
 
 function snapshot(ctx, state) {
   const active = findProject(state, state.activeProjectId) || state.projects[0] || null;
-  return {
-    ok: true,
-    state,
-    model: currentModel(ctx, state, active),
-    revision: Number(state.revision) || 0,
-    savedAt: state.savedAt || null,
-    system: DEFAULT_SYSTEM,
-  };
+    return {
+      ok: true,
+      state,
+      model: currentModel(ctx, state, active),
+      revision: Number(state.revision) || 0,
+      savedAt: state.savedAt || null,
+      autoTitle: state.autoTitle !== false,
+      system: DEFAULT_SYSTEM,
+    };
 }
 
 /** Abort every live generation whose run entry matches `predicate`. */
@@ -1285,6 +1295,7 @@ function cardUpdate(state, body) {
   if (card.status === 'running') throw new Error('这张卡片正在生成中');
   if (typeof body.prompt === 'string') card.prompt = body.prompt.slice(0, 20000);
   if (typeof body.answer === 'string') card.answer = body.answer;
+  if (typeof body.title === 'string') card.title = cleanCardTitle(body.title).slice(0, 60);
   if (typeof body.status === 'string') card.status = body.status;
   if (typeof body.error === 'string' || body.error === null) card.error = body.error;
   card.updatedAt = nowIso();
@@ -1700,6 +1711,77 @@ async function runStream(ctx, state, project, card, emit, register, options) {
   };
 }
 
+/* ---------------------------------------------------------------- card title */
+
+const TITLE_MAX_CHARS = 24;
+
+/** Keep only the title line: no quotes, markup, trailing punctuation or length bombs. */
+function cleanCardTitle(raw) {
+  const lines = String(raw || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  let text = lines[0] || '';
+  text = text.replace(/^[#>*\-\s]+/, '');
+  text = text.replace(/^["'“”‘’《》「」【】]+|["'“”‘’《》「」【】]+$/g, '');
+  text = text.replace(/^标题[:：]\s*/, '');
+  text = text.replace(/[。！？!?；;，,、.\s]+$/g, '');
+  text = text.replace(/\s+/g, ' ').trim();
+  if (text.length > TITLE_MAX_CHARS) text = text.slice(0, TITLE_MAX_CHARS).trim();
+  return text;
+}
+
+/**
+ * Give a card a short name of its own (like DSH's "title follows the chat"
+ * plugin): the answer, not just the opening question, decides what it is about.
+ * Best effort — a failure here must never break generation.
+ */
+async function generateCardTitle(ctx, state, project, card) {
+  try {
+    const llm = ctx.get('llm');
+    if (!llm || typeof llm.stream !== 'function') return null;
+    const answer = String(card.answer || '').trim();
+    if (!answer) return null;
+    const model = currentModel(ctx, state, project);
+    const excerpt = foldAnswer(answer, 700);
+    const current = cleanCardTitle(card.title);
+    const request = {
+      provider: model.provider,
+      model: model.model,
+      system:
+        '你为知识卡片起名字。只输出标题本身：中文 2–8 个字，英文 2–5 个词。不要标点、引号、书名号，不要解释。',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text:
+                '卡片问题：' +
+                String(card.prompt || '') +
+                '\n\n卡片回答（节选）：\n' +
+                excerpt +
+                (current ? '\n\n现在的标题：' + current + '\n（如果它仍然准确就原样返回；如果回答已经转向别的内容，就换一个更贴切的）' : ''),
+            },
+          ],
+        },
+      ],
+      maxTokens: 64,
+      signal: AbortSignal.timeout(20000),
+    };
+    let text = '';
+    for await (const chunk of llm.stream(request)) {
+      if (chunk && chunk.type === 'text-delta') text += chunk.text || '';
+      if (text.length > 400) break;
+    }
+    const title = cleanCardTitle(text);
+    return title || null;
+  } catch (error) {
+    console.warn('[card-tree] card title generation failed:', error && error.message);
+    return null;
+  }
+}
+
 /* ---------------------------------------------------------------- routing */
 
 async function handleRequest(ctx, state, controllers, req, res) {
@@ -1778,6 +1860,29 @@ async function handleRequest(ctx, state, controllers, req, res) {
     } else {
       throw new Error('未知的模型操作');
     }
+    saveState(state);
+    return sendJson(res, 200, snapshot(ctx, state));
+  }
+
+  if (route === '/title') {
+    const project = findProject(state, body.projectId);
+    if (!project) throw new Error('项目不存在');
+    const card = findCard(project, body.cardId);
+    if (!card) throw new Error('卡片不存在');
+    if (!String(card.answer || '').trim()) {
+      return sendJson(res, 400, { ok: false, error: '这张卡片还没有回答，暂时不能起标题' });
+    }
+    const title = await generateCardTitle(ctx, state, project, card);
+    if (title && title !== card.title) {
+      card.title = title;
+      card.updatedAt = nowIso();
+      saveState(state);
+    }
+    return sendJson(res, 200, Object.assign(snapshot(ctx, state), { title: title || card.title || '' }));
+  }
+
+  if (route === '/autoTitle') {
+    state.autoTitle = body.enabled !== false;
     saveState(state);
     return sendJson(res, 200, snapshot(ctx, state));
   }
@@ -2097,6 +2202,7 @@ export const __test = {
   cardReparent,
   cardRefs,
   cardUpdate,
+  cleanCardTitle,
   emptyState,
   findCard,
   findFollowUp,

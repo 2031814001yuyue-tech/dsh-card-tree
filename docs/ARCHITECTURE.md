@@ -35,6 +35,7 @@
   "savedAt": "ISO",
   "activeProjectId": "p_xxx",
   "sessions": { "<sessionId>": "<projectId>" },   // 会话 ↔ 树绑定
+  "autoTitle": true,                              // 回答后是否让模型给卡片起标题
   "model": { "provider": "...", "model": "...", "reasoningEffort": "..." } | null,
   "projects": [
     {
@@ -48,6 +49,7 @@
           "parentId": "c_yyy" | null,           // 唯一的树结构来源
           "mode": "root" | "child" | "diverge" | "branch" | "isolated",
           "prompt": "问题",
+          "title": "模型按回答起的短标题（空则回退到问题首行；/title 写入）",
           "answer": "回答（Markdown）",
           "reasoning": "模型的思考过程（纯文本，可空；追问各存各的）",
           "status": "idle" | "running" | "done" | "partial" | "error",
@@ -122,6 +124,8 @@
 | POST | `/session` | `{op:'bind'|'unbind'}` 会话 ↔ 树 |
 | POST | `/card` | `{op:'create'|'update'|'delete'}`；另有 `{op:'reparent', cardId, parentId}`（改父节点，成环被拒）、`{op:'layout', positions:{cardId:{x,y}}\|'reset'}`（全览手动坐标）、`{op:'follow', cardId, prompt}`（卡片内追问，返回的 snapshot 里多一条 `card.followUps`）和 `{op:'ref', cardId, targetId, remove?}`（虚线引用，写 `card.refs`，最多 8 条、不能引用自己） |
 | POST | `/send` | 开 SSE 生成一张卡片或一条追问；可带 `attachments` 与 `followUpId`；`start` 帧返回 `runId` 与上下文预算 |
+| POST | `/title` | `{projectId, cardId}`：让模型按问题 + 回答节选给卡片起短标题，写入 `card.title`；没有回答时 400。响应带 `title` |
+| POST | `/autoTitle` | `{enabled}`：开关「回答后自动起标题」，写 `state.autoTitle` |
 | POST | `/stop` | `{runId}` 精确停止；兼容旧的 `{projectId, cardId, followUpId?}`；目标落成 `partial`（有文本）或 `idle` |
 
 `/send` 的 SSE 帧（`data: <json>\n\n`）：
@@ -208,7 +212,8 @@ client 侧还有一层 rAF 合并（`streamPending` + `streamFrame`），一帧�
 1. `COPY`（zh/en 两份键集合，必须一一对应，`scripts/verify.mjs` 会查）
 2. localStorage 相关：`TREE_OPEN_KEY` / `TREE_WIDTH_*` / `COLLAPSED_KEY` / `MODE_KEY`
 3. `createStore()`：状态 + `useSyncExternalStore` 订阅；含 SSE 解析（rAF 合并）、附件读取（FileReader→base64）、
-   项目名/背景防抖保存（450ms）、`importProject`/`restoreProject`、`loadModels`/`setModel`/`loadEfforts`/`setEffort`（带 projectId）
+   项目名/背景防抖保存（450ms）、`importProject`/`restoreProject`、`loadModels`/`setModel`/`loadEfforts`/`setEffort`（带 projectId）、
+   `refreshTitle`/`setAutoTitle`（答完后让宿主给卡片起名，`⋯` 里可关可补）
 4. 模块级 `services.layout` / `goToPanel()` / `goToConversation()` / `remountConversation()`
 5. CSS 模板串（只用 `--dsw-alias-*` token）
 6. 图标 `svg()` + `Glyph*`，`Menu`，`ModelPicker`，`EffortPicker`

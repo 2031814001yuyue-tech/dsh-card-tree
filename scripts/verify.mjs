@@ -437,6 +437,21 @@ checkAsync('context budget', async () => {
   return plan.stats.foldedCards + ' folded';
 });
 
+checkAsync('card title', async () => {
+  assert(T.cleanCardTitle('  ## "卡片树：一张卡片一个结论。"  ') === '卡片树：一张卡片一个结论', 'should strip markup and quotes');
+  assert(T.cleanCardTitle('标题：为什么要用树\n第二行解释') === '为什么要用树', 'should keep only the first line');
+  assert(T.cleanCardTitle('   ') === '', 'empty input should stay empty');
+  const long = T.cleanCardTitle('一'.repeat(60));
+  assert(long.length === 24, 'long titles must be capped, got ' + long.length);
+  const state = T.emptyState();
+  const project = T.projectCreate(state, { title: 'Naming' });
+  const card = project.cards[0];
+  T.cardUpdate(state, { projectId: project.id, cardId: card.id, answer: 'x' });
+  T.cardUpdate(state, { projectId: project.id, cardId: card.id, title: '回答决定的名字' });
+  assert(card.title === '回答决定的名字', 'cardUpdate should store a title');
+  return 'clean + persisted';
+});
+
 checkAsync('revision', async () => {
   const state = T.emptyState();
   T.projectCreate(state, { title: 'Revision' });
