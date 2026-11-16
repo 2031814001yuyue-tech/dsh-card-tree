@@ -125,7 +125,7 @@
 | POST | `/card` | `{op:'create'|'update'|'delete'}`；另有 `{op:'reparent', cardId, parentId}`（改父节点，成环被拒）、`{op:'layout', positions:{cardId:{x,y}}\|'reset'}`（全览手动坐标）、`{op:'follow', cardId, prompt}`（卡片内追问，返回的 snapshot 里多一条 `card.followUps`）和 `{op:'ref', cardId, targetId, remove?}`（虚线引用，写 `card.refs`，最多 8 条、不能引用自己） |
 | POST | `/send` | 开 SSE 生成一张卡片或一条追问；可带 `attachments` 与 `followUpId`；`start` 帧返回 `runId` 与上下文预算 |
 | POST | `/title` | `{projectId, cardId}`：让模型按问题 + 回答节选给卡片起短标题，写入 `card.title`；没有回答时 400。响应带 `title` |
-| POST | `/autoTitle` | `{enabled}`：开关「回答后自动起标题」，写 `state.autoTitle` |
+| POST | `/autoTitle` | `{enabled}`：写 `state.autoTitle`；客户端默认开启，界面上不提供开关（留作脚本/调试用） |
 | POST | `/stop` | `{runId}` 精确停止；兼容旧的 `{projectId, cardId, followUpId?}`；目标落成 `partial`（有文本）或 `idle` |
 
 `/send` 的 SSE 帧（`data: <json>\n\n`）：
@@ -213,7 +213,7 @@ client 侧还有一层 rAF 合并（`streamPending` + `streamFrame`），一帧�
 2. localStorage 相关：`TREE_OPEN_KEY` / `TREE_WIDTH_*` / `COLLAPSED_KEY` / `MODE_KEY`
 3. `createStore()`：状态 + `useSyncExternalStore` 订阅；含 SSE 解析（rAF 合并）、附件读取（FileReader→base64）、
    项目名/背景防抖保存（450ms）、`importProject`/`restoreProject`、`loadModels`/`setModel`/`loadEfforts`/`setEffort`（带 projectId）、
-   `refreshTitle`/`setAutoTitle`（答完后让宿主给卡片起名，`⋯` 里可关可补）
+   `refreshTitle`（答完后让宿主按回答给卡片起名；自动执行，界面不提供开关）
 4. 模块级 `services.layout` / `goToPanel()` / `goToConversation()` / `remountConversation()`
 5. CSS 模板串（只用 `--dsw-alias-*` token）
 6. 图标 `svg()` + `Glyph*`，`Menu`，`ModelPicker`，`EffortPicker`
