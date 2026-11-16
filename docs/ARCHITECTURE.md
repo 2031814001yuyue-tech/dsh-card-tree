@@ -49,6 +49,7 @@
           "mode": "root" | "child" | "diverge" | "branch" | "isolated",
           "prompt": "问题",
           "answer": "回答（Markdown）",
+          "reasoning": "模型的思考过程（纯文本，可空；追问各存各的）",
           "status": "idle" | "running" | "done" | "partial" | "error",
           "runId": "run_xxx" | null,             // 正在生成的那一次的 id（/stop 用它精确定位）
           "error": null | "错误文本",
@@ -60,6 +61,7 @@
               "id": "f_xxx",
               "prompt": "追问",
               "answer": "回答（Markdown）",
+              "reasoning": "这条追问自己的思考过程（可空）",
               "status": "idle" | "running" | "done" | "partial" | "error",
               "error": null | "错误文本",
               "tools": [], "steps": [], "stats": null,
@@ -128,12 +130,13 @@
 start   {runId, provider, model, tools:[name], contextWindow, budget, approxTokens,
          foldedCards, droppedCards, droppedRefs, refs}    ── 开始（含上下文预算结果）
 delta   {text}                                     ── 累计文本（不是增量！client 用 replace）
+reasoning {text}                                   ── 累计思考过程（同样替换不追加，可空）
 tool    {phase:'start', calls:[{name, arguments}]}
 tool    {phase:'end', steps:[{name, arguments, ok, preview}]}
 notice  {text}                                     ── 例如「当前模型看不了图，已改用 X」
 done    {card, model, stats}
-aborted {card, answer, status}                     ── 被停止/中断：status 可能是 partial
-error   {card, error}
+aborted {card, answer, reasoning, status}          ── 被停止/中断：status 可能是 partial
+error   {card, error, reasoning}
 ```
 
 生成追问时，上面每一帧都会多一个 `followUpId` 字段；`card` 仍然是整张卡片（含 `followUps` 数组）。
@@ -179,6 +182,7 @@ client 侧还有一层 rAF 合并（`streamPending` + `streamFrame`），一帧�
  │    emit start（含 runId / budget / approxTokens / 折叠张数）
  │    streamOnce: llm.stream({provider, model, messages, system, tools, signal})
  │      ├─ text-delta  → emit delta（累计文本）
+ │      ├─ reasoning-delta → emit reasoning（累计思考过程，前端折叠展示）
  │      ├─ block-end(tool-call) → 收集
  │      └─ finish: error/aborted 转成异常
  │    有 tool-call → toolCallAllowed 逐个校验（名字白名单 + tools.json 的参数限制）
@@ -209,7 +213,8 @@ client 侧还有一层 rAF 合并（`streamPending` + `streamFrame`），一帧�
 5. CSS 模板串（只用 `--dsw-alias-*` token）
 6. 图标 `svg()` + `Glyph*`，`Menu`，`ModelPicker`，`EffortPicker`
 7. 业务组件：`Row` / `TreeRows`（含搜索过滤）/ `Overview`（拖动、↗ 改父级、⇢ 引用虚线、删除/自动排列）/
-   `ToolSteps` / `Detail`（追问线程、引用区、partial 与「继续」、上下文徽标、`重答 ▾`）/
+   `ToolSteps` / `Reasoning`（回答上方的思考过程折叠条，卡片与追问各一条）/
+   `Detail`（追问线程、引用区、partial 与「继续」、上下文徽标、`重答 ▾`）/
    `Composer`（模式胶囊菜单 `↳ 深入 ▾`，方向记在 localStorage）/ `TreeComposer`（会话输入框接管）/
    `Root`（搜索、导出/导入、删除撤销、
    Escape 关闭顺序、错误/通知 toast）

@@ -51,6 +51,8 @@ window.__ModuleLoader__.load({
         send: '发送',
         stop: '停止',
         thinking: '正在生成…',
+        reasoningLabel: '思考过程',
+        reasoningThinking: '思考中…',
         rerun: '重答',
         rerunHint: '用同样的上下文重新生成这张卡片的回答',
         branchAnswer: '分支重答',
@@ -184,6 +186,8 @@ window.__ModuleLoader__.load({
         send: 'Send',
         stop: 'Stop',
         thinking: 'Generating…',
+        reasoningLabel: 'Reasoning',
+        reasoningThinking: 'Thinking…',
         rerun: 'Retry',
         rerunHint: 'Regenerate this card with the same context',
         branchAnswer: 'Branch answer',
@@ -452,6 +456,7 @@ window.__ModuleLoader__.load({
         selectedCardId: null,
         streaming: {},
         toolSteps: {},
+        reasoning: {},
         draft: '',
         mode: readMode(),
         attachments: [],
@@ -478,6 +483,26 @@ window.__ModuleLoader__.load({
       let projectSaveFields = null;
       let streamFrame = 0;
       const streamPending = new Map();
+      const reasonPending = new Map();
+
+      /* Answer and reasoning both arrive as cumulative text; paint at most once a frame. */
+      function scheduleStreamFlush() {
+        if (streamFrame) return;
+        streamFrame = requestAnimationFrame(() => {
+          streamFrame = 0;
+          const nextStreaming = Object.assign({}, state.streaming);
+          for (const [key, text] of streamPending) {
+            if (Object.prototype.hasOwnProperty.call(state.streaming, key)) nextStreaming[key] = text;
+          }
+          streamPending.clear();
+          const nextReasoning = Object.assign({}, state.reasoning);
+          for (const [key, text] of reasonPending) {
+            if (Object.prototype.hasOwnProperty.call(state.reasoning, key)) nextReasoning[key] = text;
+          }
+          reasonPending.clear();
+          patch({ streaming: nextStreaming, reasoning: nextReasoning });
+        });
+      }
 
       function emit() {
         for (const listener of Array.from(listeners)) {
@@ -709,6 +734,7 @@ window.__ModuleLoader__.load({
         delete toolSteps[streamKey];
         patch({
           streaming: Object.assign({}, state.streaming, { [streamKey]: '' }),
+          reasoning: Object.assign({}, state.reasoning, { [streamKey]: '' }),
           toolSteps,
           selectedCardId: cardId,
         });
@@ -766,17 +792,10 @@ window.__ModuleLoader__.load({
                 } else if (event.type === 'delta') {
                   /* Deltas carry the whole answer so far: paint at most once a frame. */
                   streamPending.set(streamKey, event.text || '');
-                  if (!streamFrame) {
-                    streamFrame = requestAnimationFrame(() => {
-                      streamFrame = 0;
-                      const next = Object.assign({}, state.streaming);
-                      for (const [key, text] of streamPending) {
-                        if (Object.prototype.hasOwnProperty.call(state.streaming, key)) next[key] = text;
-                      }
-                      streamPending.clear();
-                      patch({ streaming: next });
-                    });
-                  }
+                  scheduleStreamFlush();
+                } else if (event.type === 'reasoning') {
+                  reasonPending.set(streamKey, event.text || '');
+                  scheduleStreamFlush();
                 } else if (event.type === 'tool') {
                   const next = Object.assign({}, state.toolSteps);
                   if (event.phase === 'end') {
@@ -799,13 +818,16 @@ window.__ModuleLoader__.load({
                   delete streaming[streamKey];
                   const liveTools = Object.assign({}, state.toolSteps);
                   delete liveTools[streamKey];
-                  patch({ streaming, toolSteps: liveTools });
+                  const liveReasoning = Object.assign({}, state.reasoning);
+                  delete liveReasoning[streamKey];
+                  patch({ streaming, toolSteps: liveTools, reasoning: liveReasoning });
                   const saved = event.card || {};
                   if (followUpId) {
                     const item = (saved.followUps || []).find((entry) => entry.id === followUpId) || {};
                     patchFollow({
                       status: 'done',
                       answer: item.answer || '',
+                      reasoning: item.reasoning || '',
                       steps: item.steps || [],
                       tools: item.tools || [],
                       error: null,
@@ -816,6 +838,7 @@ window.__ModuleLoader__.load({
                       {
                         status: 'done',
                         answer: saved.answer || '',
+                        reasoning: saved.reasoning || '',
                         steps: saved.steps || [],
                         tools: saved.tools || [],
                         error: null,
@@ -829,20 +852,39 @@ window.__ModuleLoader__.load({
                   delete streaming[streamKey];
                   const liveTools = Object.assign({}, state.toolSteps);
                   delete liveTools[streamKey];
-                  patch({ streaming, toolSteps: liveTools });
+                  const liveReasoning = Object.assign({}, state.reasoning);
+                  delete liveReasoning[streamKey];
+                  patch({ streaming, toolSteps: liveTools, reasoning: liveReasoning });
                   const keptAnswer = event.answer || '';
+                  const keptReasoning = event.reasoning || '';
                   const keptStatus = event.status || (keptAnswer ? 'partial' : 'idle');
-                  if (followUpId) patchFollow({ status: keptStatus, answer: keptAnswer, error: null });
-                  else patchCard(cardId, { status: keptStatus, answer: keptAnswer, error: null }, project.id);
+                  if (followUpId) {
+                    patchFollow({ status: keptStatus, answer: keptAnswer, reasoning: keptReasoning, error: null });
+                  } else {
+                    patchCard(
+                      cardId,
+                      { status: keptStatus, answer: keptAnswer, reasoning: keptReasoning, error: null },
+                      project.id,
+                    );
+                  }
                 } else if (event.type === 'error') {
                   finished = true;
                   const streaming = Object.assign({}, state.streaming);
                   delete streaming[streamKey];
                   const liveTools = Object.assign({}, state.toolSteps);
                   delete liveTools[streamKey];
-                  patch({ streaming, toolSteps: liveTools });
-                  if (followUpId) patchFollow({ status: 'error', error: event.error || '生成失败' });
-                  else patchCard(cardId, { status: 'error', error: event.error || '生成失败' }, project.id);
+                  const liveReasoning = Object.assign({}, state.reasoning);
+                  delete liveReasoning[streamKey];
+                  patch({ streaming, toolSteps: liveTools, reasoning: liveReasoning });
+                  if (followUpId) {
+                    patchFollow({ status: 'error', reasoning: event.reasoning || '', error: event.error || '生成失败' });
+                  } else {
+                    patchCard(
+                      cardId,
+                      { status: 'error', reasoning: event.reasoning || '', error: event.error || '生成失败' },
+                      project.id,
+                    );
+                  }
                 }
               }
             }
@@ -852,7 +894,9 @@ window.__ModuleLoader__.load({
             delete streaming[streamKey];
             const liveTools = Object.assign({}, state.toolSteps);
             delete liveTools[streamKey];
-            patch({ streaming, toolSteps: liveTools, notice: t().streamLost });
+            const liveReasoning = Object.assign({}, state.reasoning);
+            delete liveReasoning[streamKey];
+            patch({ streaming, toolSteps: liveTools, reasoning: liveReasoning, notice: t().streamLost });
             /* The stream died mid-flight: re-sync with what the Host actually saved. */
             load().catch(() => {});
           }
@@ -861,7 +905,9 @@ window.__ModuleLoader__.load({
           delete streaming[streamKey];
           const liveTools = Object.assign({}, state.toolSteps);
           delete liveTools[streamKey];
-          patch({ streaming, toolSteps: liveTools });
+          const liveReasoning = Object.assign({}, state.reasoning);
+          delete liveReasoning[streamKey];
+          patch({ streaming, toolSteps: liveTools, reasoning: liveReasoning });
           if (followUpId) patchFollow({ status: 'error', error: String((error && error.message) || error) });
           else patchCard(cardId, { status: 'error', error: String((error && error.message) || error) }, project.id);
         }
@@ -1466,6 +1512,13 @@ window.__ModuleLoader__.load({
 .ct-tool-mark{color:var(--dsw-alias-state-success-primary);font-weight:700;width:12px}
 .ct-tool-name{font-family:ui-monospace,Consolas,monospace;color:var(--dsw-alias-label-primary);font-size:12px}
 .ct-tool-args,.ct-tool-out{margin:5px 0 0;padding:7px 9px;border-radius:7px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);font-size:11.5px;font-family:ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow:auto}
+/* ---------- reasoning ---------- */
+.ct-reasoning{margin:12px 0 0;border-radius:10px;background:var(--dsw-alias-bg-layer-1);overflow:hidden}
+.ct-reasoning-head{display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;background:transparent;border:0;cursor:pointer;color:var(--dsw-alias-label-secondary);font-size:11.5px;font-family:var(--dsw-font-family);text-align:left}
+.ct-reasoning-head:hover{background:var(--dsw-alias-bg-layer-2)}
+.ct-reasoning-caret{color:var(--dsw-alias-label-secondary);font-size:10px;width:10px}
+.ct-reasoning-title{color:var(--dsw-alias-label-secondary);font-weight:600}
+.ct-reasoning-body{max-height:320px;overflow:auto;padding:8px 12px 10px;border-top:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);font-size:12.5px;line-height:1.72;white-space:pre-wrap;overflow-wrap:anywhere}
 /* ---------- actions ---------- */
 .ct-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:22px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l1)}
 .ct-actions .ct-btn{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}
@@ -2928,6 +2981,29 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function Reasoning(props) {
+      const strings = t();
+      const text = String(props.text || '');
+      const open = React.useState(false);
+      const expanded = open[0];
+      if (!text && !props.running) return null;
+      return h(
+        'div',
+        { className: 'ct-reasoning' },
+        h(
+          'button',
+          { type: 'button', className: 'ct-reasoning-head', onClick: () => open[1](!expanded) },
+          h('span', { className: 'ct-reasoning-caret' }, expanded ? '▾' : '▸'),
+          h(
+            'span',
+            { className: 'ct-reasoning-title' },
+            props.running && !text ? strings.reasoningThinking : strings.reasoningLabel,
+          ),
+        ),
+        expanded ? h('div', { className: 'ct-reasoning-body' }, text || strings.reasoningThinking) : null,
+      );
+    }
+
     function Detail(props) {
       const card = props.card;
       const streaming = props.streaming;
@@ -3043,6 +3119,12 @@ window.__ModuleLoader__.load({
               ),
             )
           : null,
+        h(Reasoning, {
+          text: running
+            ? (props.reasoningMap && props.reasoningMap[card.id]) || card.reasoning || ''
+            : card.reasoning || '',
+          running,
+        }),
         running
           ? h(
               'div',
@@ -3116,6 +3198,12 @@ window.__ModuleLoader__.load({
                   ),
                   h('div', { className: 'ct-follow-q' }, item.prompt),
                   attachRow(item.attachments),
+                  h(Reasoning, {
+                    text: isRunning
+                      ? (props.reasoningMap && props.reasoningMap[key]) || item.reasoning || ''
+                      : item.reasoning || '',
+                    running: isRunning,
+                  }),
                   isRunning
                     ? h(
                         'div',
@@ -4107,6 +4195,7 @@ window.__ModuleLoader__.load({
                               liveSteps: state.toolSteps[selected.id],
                               streamingMap: state.streaming,
                               toolSteps: state.toolSteps,
+                              reasoningMap: state.reasoning,
                               copiedCardId: state.copiedCardId,
                               refs: Array.isArray(selected.refs)
                                 ? selected.refs

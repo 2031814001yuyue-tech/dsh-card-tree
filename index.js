@@ -328,7 +328,9 @@ function loadState() {
         if (!Array.isArray(card.followUps)) card.followUps = [];
         // Dashed references survive a reload as plain id lists.
         if (!Array.isArray(card.refs)) card.refs = [];
+        if (typeof card.reasoning !== 'string') card.reasoning = '';
         for (const followUp of card.followUps) {
+          if (typeof followUp.reasoning !== 'string') followUp.reasoning = '';
           if (followUp && followUp.status === 'running') {
             const partial = String(followUp.answer || '').trim();
             followUp.status = partial ? 'partial' : 'error';
@@ -1231,6 +1233,7 @@ function cardCreate(state, body) {
     mode: isolated ? 'isolated' : typeof body.mode === 'string' ? body.mode : 'child',
     prompt,
     answer: '',
+    reasoning: '',
     followUps: [],
     status: 'idle',
     error: null,
@@ -1257,6 +1260,7 @@ function cardFollowCreate(state, body) {
     id: nid('f'),
     prompt,
     answer: '',
+    reasoning: '',
     status: 'idle',
     error: null,
     createdAt: nowIso(),
@@ -1494,9 +1498,13 @@ async function runStream(ctx, state, project, card, emit, register, options) {
   const baseOptions = Object.assign({}, options, { budget, stats, system });
   const parts = [];
   const steps = [];
+  const reasoningParts = [];
   let currentText = '';
+  let currentReasoning = '';
   let lastPartialAt = 0;
   const composite = () => parts.concat(currentText ? [currentText] : []).join('\n\n');
+  const compositeReasoning = () =>
+    reasoningParts.concat(currentReasoning ? [currentReasoning] : []).join('\n\n');
   const onPartial = options && typeof options.onPartial === 'function' ? options.onPartial : null;
 
   const build = (messages) => {
@@ -1515,19 +1523,34 @@ async function runStream(ctx, state, project, card, emit, register, options) {
   /** One model call: the visible text plus the tool calls it asked for. */
   const streamOnce = async (messages) => {
     let text = '';
+    let reasoning = '';
     currentText = '';
+    currentReasoning = '';
     const calls = [];
     let finishKind = null;
     for await (const chunk of llm.stream(build(messages))) {
       if (!chunk || typeof chunk !== 'object') continue;
-      if (chunk.type === 'text-delta') {
+      if (chunk.type === 'reasoning-delta') {
+        /* 思考过程与正文分开累计：前端把它折叠在回答上方。 */
+        reasoning += chunk.text || '';
+        currentReasoning = reasoning;
+        emit({ type: 'reasoning', text: compositeReasoning() });
+        if (onPartial && Date.now() - lastPartialAt > 2500) {
+          lastPartialAt = Date.now();
+          try {
+            onPartial(composite(), compositeReasoning());
+          } catch (error) {
+            /* partial persistence is best effort */
+          }
+        }
+      } else if (chunk.type === 'text-delta') {
         text += chunk.text;
         currentText = text;
         emit({ type: 'delta', text: composite() });
         if (onPartial && Date.now() - lastPartialAt > 2500) {
           lastPartialAt = Date.now();
           try {
-            onPartial(composite(), false);
+            onPartial(composite(), compositeReasoning());
           } catch (error) {
             /* partial persistence is best effort */
           }
@@ -1547,7 +1570,7 @@ async function runStream(ctx, state, project, card, emit, register, options) {
         }
       }
     }
-    return { text, calls, finishKind };
+    return { text, reasoning, calls, finishKind };
   };
 
   let messages = buildMessages(project, card, model, baseOptions);
@@ -1580,6 +1603,7 @@ async function runStream(ctx, state, project, card, emit, register, options) {
     if (!outcome.calls.length || outcome.finishKind !== 'tool-calls') break;
     if (!toolsService || typeof toolsService.execute !== 'function') break;
     if (outcome.text) parts.push(outcome.text);
+    if (outcome.reasoning) reasoningParts.push(outcome.reasoning);
 
     const started = outcome.calls.map((call) => ({
       name: call.name,
@@ -1662,10 +1686,13 @@ async function runStream(ctx, state, project, card, emit, register, options) {
   }
 
   if (outcome.text) parts.push(outcome.text);
+  if (outcome.reasoning) reasoningParts.push(outcome.reasoning);
   currentText = '';
+  currentReasoning = '';
 
   return {
     text: composite(),
+    reasoning: compositeReasoning(),
     model,
     steps,
     tools: schemas.map((schema) => schema.name),
@@ -1836,6 +1863,7 @@ async function handleRequest(ctx, state, controllers, req, res) {
     const runId = nid('run');
     target.status = 'running';
     target.answer = '';
+    target.reasoning = '';
     target.error = null;
     target.runId = runId;
     target.steps = [];
@@ -1897,9 +1925,10 @@ async function handleRequest(ctx, state, controllers, req, res) {
       toolsService = null;
     }
 
-    const onPartial = (text) => {
-      if (!text) return;
-      target.answer = text;
+    const onPartial = (text, reasoning) => {
+      if (!text && !reasoning) return;
+      if (text) target.answer = text;
+      if (reasoning) target.reasoning = reasoning;
       target.status = 'running';
       try {
         saveState(state);
@@ -1918,6 +1947,7 @@ async function handleRequest(ctx, state, controllers, req, res) {
         onPartial,
       });
       target.answer = result.text;
+      target.reasoning = result.reasoning || '';
       target.steps = result.steps || [];
       target.tools = result.tools || [];
       target.stats = result.stats || null;
@@ -1945,8 +1975,14 @@ async function handleRequest(ctx, state, controllers, req, res) {
       if (!closed) {
         emit(
           aborted
-            ? { type: 'aborted', card, answer: target.answer || '', status: target.status }
-            : { type: 'error', card, error: target.error },
+            ? {
+                type: 'aborted',
+                card,
+                answer: target.answer || '',
+                reasoning: target.reasoning || '',
+                status: target.status,
+              }
+            : { type: 'error', card, error: target.error, reasoning: target.reasoning || '' },
         );
       }
     } finally {
