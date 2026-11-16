@@ -1912,6 +1912,17 @@ window.__ModuleLoader__.load({
 .ct-tip{border-radius:12px;box-shadow:0 16px 40px color-mix(in srgb,var(--dsw-alias-label-primary) 18%,transparent)}
 .ct-modal{border:1px solid var(--dsw-alias-border-l1);border-radius:16px;box-shadow:0 20px 60px color-mix(in srgb,var(--dsw-alias-label-primary) 24%,transparent)}
 .ct-root ::selection{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 24%,transparent)}
+/* ---------- refinement: the list reads as a diagram, the page as a sheet ---------- */
+.ct-row[data-titled="1"] .ct-row-text{font-family:var(--ct-display);font-size:13px;font-weight:600;letter-spacing:-.003em}
+.ct-row[data-titled="1"] .ct-row-text:hover{color:var(--dsw-alias-label-primary)}
+.ct-root button:focus-visible,.ct-root input:focus-visible,.ct-root textarea:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
+.ct-question{text-wrap:pretty;max-width:34em}
+.ct-textarea::placeholder{color:color-mix(in srgb,var(--dsw-alias-label-secondary) 80%,transparent)}
+.ct-node-text{font-family:var(--ct-display);font-size:13px;font-weight:600;letter-spacing:-.004em}
+.ct-send{font-weight:600;letter-spacing:.01em}
+.ct-tree-head{letter-spacing:.14em}
+.ct-meta{margin-bottom:2px}
+.ct-answer{text-wrap:pretty}
 .ct-root--compact .ct-top{height:54px;padding:0 12px;gap:6px}
 .ct-root--compact .ct-top-meta{display:none}
 .ct-root--compact .ct-tree-head{min-height:46px}
@@ -1922,7 +1933,7 @@ window.__ModuleLoader__.load({
 .ct-root--compact .ct-seg{max-width:100%;overflow-x:auto;flex-wrap:nowrap}
 .ct-root--compact .ct-seg-btn{padding:4px 8px}
 .ct-root--compact .ct-empty h3{font-size:21px}
-@media (prefers-reduced-motion:reduce){.ct-detail{animation:none}.ct-btn--primary:hover,.ct-send:hover{transform:none}}
+@media (prefers-reduced-motion:reduce){.ct-detail{animation:none}.ct-btn--primary:hover,.ct-send:hover{transform:none}.ct-row{transition:none}}
 `;
 
     /* ----------------------------------------------------------- components */
@@ -2255,6 +2266,7 @@ window.__ModuleLoader__.load({
         'div',
         {
           className: 'ct-row' + (active ? ' ct-row--active' : ''),
+          'data-titled': String(card.title || '').trim() ? '1' : '0',
           style: { marginLeft: depth * 13 + 'px' },
           onClick: () => props.onSelect(card),
           title: card.prompt,
