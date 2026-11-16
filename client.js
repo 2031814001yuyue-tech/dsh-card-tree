@@ -93,6 +93,13 @@ window.__ModuleLoader__.load({
         emptyStartTitle: '从第一个问题开始',
         emptyStartHint: '每个项目是一棵树。先建一个项目，再在下面输入第一个问题 —— 它会成为树根，之后每张卡片都能继续长。',
         emptyCardsHint: '这棵树还是空的。在下面输入第一个问题，它会成为树根。',
+        stepAsk: '写下一个问题',
+        stepAnswer: '拿到一张卡片',
+        stepGrow: '在卡片上继续深入',
+        sampleTitle: '不知道问什么？试试：',
+        sampleOne: '用一杯咖啡解释什么是递归',
+        sampleTwo: '为什么注意力机制的代价是平方级的',
+        sampleThree: '把这周的待办排出优先级',
         selectHint: '从左侧选一张卡片，或直接在下面开一个新问题。',
         emptyTreeHint: '树里的卡片会出现在这里',
         modelLabel: '模型',
@@ -228,6 +235,13 @@ window.__ModuleLoader__.load({
         emptyStartTitle: 'Start with a question',
         emptyStartHint: 'Each project is a tree. Create one, then type the first question below — it becomes the root, and every card can keep growing.',
         emptyCardsHint: 'This tree is empty. Type the first question below to plant its root.',
+        stepAsk: 'Ask a question',
+        stepAnswer: 'Get a card back',
+        stepGrow: 'Keep growing from it',
+        sampleTitle: 'Not sure where to start? Try:',
+        sampleOne: 'Explain recursion with a cup of coffee',
+        sampleTwo: 'Why is attention quadratic in cost',
+        sampleThree: 'Rank this week’s todos by priority',
         selectHint: 'Pick a card on the left, or just ask a new question below.',
         emptyTreeHint: 'Cards in this tree will show up here',
         modelLabel: 'Model',
@@ -937,8 +951,13 @@ window.__ModuleLoader__.load({
         const typed = String(prompt || '').trim();
         if (!typed && pendingAttachments.length === 0) return;
         const text = typed || t().attachOnlyPrompt;
-        const project = activeProject();
-        if (!project) return;
+        let project = activeProject();
+        if (!project) {
+          /* First question with no project yet: plant the project, then the root card. */
+          await newProject();
+          project = activeProject();
+          if (!project) return;
+        }
         const selected = project.cards.find((card) => card.id === state.selectedCardId) || null;
         const mode = modeOverride || (selected || state.mode === 'isolated' ? state.mode : 'root');
         const pending = pendingAttachments;
@@ -1895,6 +1914,15 @@ window.__ModuleLoader__.load({
 .ct-empty h3{font-family:var(--ct-display);font-size:24px;font-weight:600;letter-spacing:-.02em;text-wrap:balance}
 .ct-empty p{max-width:440px;font-size:13px;line-height:1.85}
 .ct-empty--quiet{padding-top:38px}
+.ct-empty-seed{color:var(--dsw-alias-brand-primary);opacity:.9;margin-bottom:2px}
+.ct-empty-steps{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 20px;margin:8px 0 2px;padding:0;list-style:none}
+.ct-empty-step{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.ct-empty-num{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;border:1px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 42%,var(--dsw-alias-border-l1));color:var(--dsw-alias-brand-primary);font-size:10.5px;line-height:1;font-variant-numeric:tabular-nums}
+.ct-samples{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:4px;max-width:480px}
+.ct-samples-label{flex-basis:100%;font-size:11.5px;color:var(--dsw-alias-label-secondary);opacity:.85}
+.ct-sample{padding:5px 11px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;transition:border-color .14s var(--ct-ease),background .14s var(--ct-ease),color .14s var(--ct-ease)}
+.ct-sample:hover{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 48%,transparent);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 7%,transparent);color:var(--dsw-alias-label-primary)}
+.ct-sample:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
 .ct-system{border:1px solid var(--dsw-alias-border-l1);border-radius:12px}
 .ct-overview-hint{min-height:48px;padding:8px 20px;background:var(--dsw-alias-bg-base)}
 .ct-overview-scroll{background-color:color-mix(in srgb,var(--dsw-alias-bg-base) 96%,var(--dsw-alias-bg-layer-1));background-image:radial-gradient(color-mix(in srgb,var(--dsw-alias-border-l2) 55%,transparent) .7px,transparent .7px);background-size:20px 20px}
@@ -1937,6 +1965,18 @@ window.__ModuleLoader__.load({
 `;
 
     /* ----------------------------------------------------------- components */
+
+    function EmptySeed() {
+      return h(
+        'svg',
+        { width: 84, height: 66, viewBox: '0 0 84 66', fill: 'none', 'aria-hidden': 'true', focusable: 'false' },
+        h('rect', { x: 28, y: 4, width: 28, height: 15, rx: 4, stroke: 'currentColor', strokeOpacity: 0.6, strokeWidth: 1.2 }),
+        h('circle', { cx: 42, cy: 11.5, r: 1.8, fill: 'currentColor', fillOpacity: 0.55 }),
+        h('path', { d: 'M42 19v9M42 28H19v9M42 28h23v9', stroke: 'currentColor', strokeOpacity: 0.32, strokeWidth: 1.2 }),
+        h('rect', { x: 6, y: 37, width: 26, height: 15, rx: 4, stroke: 'currentColor', strokeOpacity: 0.42, strokeWidth: 1.2 }),
+        h('rect', { x: 52, y: 37, width: 26, height: 15, rx: 4, stroke: 'currentColor', strokeOpacity: 0.42, strokeWidth: 1.2 }),
+      );
+    }
 
     function GlyphTree(size) {
       return h(
@@ -3857,36 +3897,83 @@ window.__ModuleLoader__.load({
         });
       }
 
+      const samples = [strings.sampleOne, strings.sampleTwo, strings.sampleThree];
+      const pickSample = (text) => {
+        store.patch({
+          mode: 'child',
+          draft: text,
+          composerFocusToken: store.get().composerFocusToken + 1,
+        });
+      };
+
       const empty = !project
         ? h(
             'div',
             { className: 'ct-empty' },
-            h('div', { className: 'ct-empty-glyph' }, GlyphTree(34)),
+            h('div', { className: 'ct-empty-seed' }, EmptySeed()),
             h('h3', null, strings.emptyStartTitle),
             h('p', null, strings.emptyStartHint),
             h(
-              'button',
-              { type: 'button', className: 'ct-btn ct-btn--primary', onClick: newProject },
-              GlyphPlus(14),
-              strings.newProject,
+              'ol',
+              { className: 'ct-empty-steps' },
+              [strings.stepAsk, strings.stepAnswer, strings.stepGrow].map((text, index) =>
+                h(
+                  'li',
+                  { key: 's' + index, className: 'ct-empty-step' },
+                  h('span', { className: 'ct-empty-num' }, String(index + 1)),
+                  text,
+                ),
+              ),
             ),
             h(
-              'button',
-              { type: 'button', className: 'ct-linkbtn', onClick: () => setHelp(true) },
-              strings.helpOpen,
+              'div',
+              { className: 'ct-empty-actions' },
+              h(
+                'button',
+                { type: 'button', className: 'ct-btn ct-btn--primary', onClick: newProject },
+                GlyphPlus(14),
+                strings.newProject,
+              ),
+              h(
+                'button',
+                { type: 'button', className: 'ct-linkbtn', onClick: () => setHelp(true) },
+                strings.helpOpen,
+              ),
             ),
           )
         : cards.length === 0
           ? h(
               'div',
               { className: 'ct-empty' },
-              h('div', { className: 'ct-empty-glyph' }, GlyphTree(34)),
+              h('div', { className: 'ct-empty-seed' }, EmptySeed()),
               h('h3', null, strings.emptyStartTitle),
               h('p', null, strings.emptyCardsHint),
               h(
-                'button',
-                { type: 'button', className: 'ct-linkbtn', onClick: () => setHelp(true) },
-                strings.helpOpen,
+                'div',
+                { className: 'ct-samples' },
+                h('span', { className: 'ct-samples-label' }, strings.sampleTitle),
+                samples.map((text, index) =>
+                  h(
+                    'button',
+                    { key: 'q' + index, type: 'button', className: 'ct-sample', onClick: () => pickSample(text) },
+                    text,
+                  ),
+                ),
+              ),
+              h(
+                'div',
+                { className: 'ct-empty-actions' },
+                h(
+                  'button',
+                  { type: 'button', className: 'ct-btn ct-btn--primary', onClick: () => focusComposer('child') },
+                  GlyphPlus(14),
+                  strings.stepAsk,
+                ),
+                h(
+                  'button',
+                  { type: 'button', className: 'ct-linkbtn', onClick: () => setHelp(true) },
+                  strings.helpOpen,
+                ),
               ),
             )
           : h('div', { className: 'ct-empty ct-empty--quiet' }, h('p', null, strings.selectHint));
