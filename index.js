@@ -1891,6 +1891,12 @@ async function handleRequest(ctx, state, controllers, req, res) {
     const op = body.op;
     if (op === 'create') projectCreate(state, body);
     else if (op === 'update') projectUpdate(state, body);
+    else if (op === 'activate') {
+      const project = findProject(state, body.projectId);
+      if (!project) throw new Error('项目不存在');
+      state.activeProjectId = project.id;
+      project.updatedAt = nowIso();
+    }
     else if (op === 'import') projectImport(state, body);
     else if (op === 'delete') {
       abortRuns(controllers, (entry) => entry.projectId === body.projectId);

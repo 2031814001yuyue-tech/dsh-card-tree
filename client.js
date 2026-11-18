@@ -497,6 +497,7 @@ window.__ModuleLoader__.load({
       let projectSaveTimer = null;
       let projectSaveFields = null;
       let streamFrame = 0;
+      let pendingActive = null;
       const streamPending = new Map();
       const reasonPending = new Map();
 
@@ -540,6 +541,13 @@ window.__ModuleLoader__.load({
 
       function applySnapshot(payload) {
         const data = payload.state || { projects: [], activeProjectId: null };
+        const serverActive = data.activeProjectId;
+        /* A mutation we fired before the Host learned about a project switch can answer
+           with the previous activeProjectId; don't let it yank the view away mid-drag. */
+        if (pendingActive && data.projects.some((project) => project.id === pendingActive)) {
+          data.activeProjectId = pendingActive;
+        }
+        if (serverActive === pendingActive) pendingActive = null;
         const active = data.projects.find((project) => project.id === data.activeProjectId) || data.projects[0] || null;
         if (active && data.activeProjectId !== active.id) data.activeProjectId = active.id;
         const stillThere = active && active.cards.some((card) => card.id === state.selectedCardId);
@@ -1066,10 +1074,16 @@ window.__ModuleLoader__.load({
 
       function selectProject(projectId) {
         if (!projectId) return;
+        pendingActive = projectId;
         patch({
           data: Object.assign({}, state.data, { activeProjectId: projectId }),
           selectedCardId: null,
         });
+        /* Remember it on the Host too: every mutation answers with a Snapshot carrying
+           its own activeProjectId, and a stale one would yank the view elsewhere. */
+        call('/project', { op: 'activate', projectId })
+          .then((payload) => applySnapshot(payload))
+          .catch(() => {});
       }
 
       async function bindSession(sessionId, title) {
@@ -3807,6 +3821,7 @@ window.__ModuleLoader__.load({
           overview: false,
           systemOpen: false,
         });
+        store.selectProject(projectId);
       }
 
       const switchItems = projects.map((entry) =>
