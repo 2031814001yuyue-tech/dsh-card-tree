@@ -387,7 +387,7 @@ await checkAsync('attachments', async () => {
   return calls.join(', ');
 });
 
-checkAsync('tool guard', async () => {
+await checkAsync('tool guard', async () => {
   const allowed = (name, args) => T.toolCallAllowed({ id: 't1', name, arguments: JSON.stringify(args || {}) });
   assert(allowed('read', { file_path: 'x' }).ok, 'read should be allowed');
   assert(allowed('web_search', { query: 'x' }).ok, 'web_search should be allowed');
@@ -402,7 +402,7 @@ checkAsync('tool guard', async () => {
   writeFileSync(
     toolsFile,
     JSON.stringify({
-      tools: ['demo_plugin_status'],
+      tools: ['demo_plugin_status', 'demo_plugin_read'],
       prefixes: ['demo_pipe_'],
       params: { demo_plugin_read: ['info', 'list'] },
     }),
@@ -414,30 +414,36 @@ checkAsync('tool guard', async () => {
   assert(!T.isReadonlyTool('demo_plugin_write'), 'local unlisted tool must stay blocked');
   assert(allowed('demo_plugin_read', { action: 'info' }).ok, 'local param allow should work');
   assert(!allowed('demo_plugin_read', { action: 'submit' }).ok, 'local param guard must block writes');
-  assert(T.readonlyStats().local === 1, 'readonly stats should count local tools');
+  assert(T.readonlyStats().local === 2, 'readonly stats should count local tools');
   writeFileSync(toolsFile, JSON.stringify({ tools: [], prefixes: [], params: {} }), 'utf8');
   T.reloadLocalToolConfig();
   assert(!T.isReadonlyTool('demo_plugin_status'), 'removing the config removes the tool');
   return 'builtin guard + local tools.json merge';
 });
 
-checkAsync('context budget', async () => {
+await checkAsync('context budget', async () => {
   const state = T.emptyState();
   const project = T.projectCreate(state, { title: 'Budget' });
-  T.cardUpdate(state, { projectId: project.id, cardId: project.cards[0].id, prompt: 'root', answer: 'x'.repeat(4000) });
-  const child = T.cardCreate(state, { projectId: project.id, parentId: project.cards[0].id, mode: 'child', prompt: 'second' });
-  T.cardUpdate(state, { projectId: project.id, cardId: child.id, answer: 'y'.repeat(4000) });
+  const root = T.cardCreate(state, { projectId: project.id, mode: 'root', prompt: 'root' });
+  T.cardUpdate(state, { projectId: project.id, cardId: root.id, answer: '一'.repeat(4000) });
+  const child = T.cardCreate(state, { projectId: project.id, parentId: root.id, mode: 'child', prompt: 'second' });
+  T.cardUpdate(state, { projectId: project.id, cardId: child.id, answer: '一'.repeat(4000) });
   const leaf = T.cardCreate(state, { projectId: project.id, parentId: child.id, mode: 'child', prompt: 'leaf' });
   const plan = T.planContext(state.projects[0], T.findCard(state.projects[0], leaf.id), { budget: 2600 });
   assert(plan.stats.foldedCards >= 1, 'expected at least one folded ancestor');
   assert(plan.entries[0].answer.length < 4000, 'folded answer should be shortened');
-  const messages = T.buildMessages(state.projects[0], T.findCard(state.projects[0], leaf.id), null, { budget: 2600 });
+  const messages = T.buildMessages(
+    state.projects[0],
+    T.findCard(state.projects[0], leaf.id),
+    { provider: 'probe', model: 'probe-1' },
+    { budget: 2600 },
+  );
   const flat = JSON.stringify(messages);
   assert(flat.includes('已省略'), 'folded text should say it was shortened');
   return plan.stats.foldedCards + ' folded';
 });
 
-checkAsync('card title', async () => {
+await checkAsync('card title', async () => {
   assert(T.cleanCardTitle('  ## "卡片树：一张卡片一个结论。"  ') === '卡片树：一张卡片一个结论', 'should strip markup and quotes');
   assert(T.cleanCardTitle('标题：为什么要用树\n第二行解释') === '为什么要用树', 'should keep only the first line');
   assert(T.cleanCardTitle('   ') === '', 'empty input should stay empty');
@@ -445,14 +451,14 @@ checkAsync('card title', async () => {
   assert(long.length === 24, 'long titles must be capped, got ' + long.length);
   const state = T.emptyState();
   const project = T.projectCreate(state, { title: 'Naming' });
-  const card = project.cards[0];
+  const card = T.cardCreate(state, { projectId: project.id, mode: 'root', prompt: 'root' });
   T.cardUpdate(state, { projectId: project.id, cardId: card.id, answer: 'x' });
   T.cardUpdate(state, { projectId: project.id, cardId: card.id, title: '回答决定的名字' });
   assert(card.title === '回答决定的名字', 'cardUpdate should store a title');
   return 'clean + persisted';
 });
 
-checkAsync('revision', async () => {
+await checkAsync('revision', async () => {
   const state = T.emptyState();
   T.projectCreate(state, { title: 'Revision' });
   T.saveState(state);
@@ -462,6 +468,107 @@ checkAsync('revision', async () => {
   assert(loaded.revision === 2, 'revision should count saves, got ' + loaded.revision);
   assert(loaded.projects.length === 2, 'reload should keep both projects');
   return 'revision ' + loaded.revision;
+});
+
+await checkAsync('zip export / import round-trip', async () => {
+  const ctx = {
+    get(name) {
+      if (name !== 'attachments') return null;
+      return {
+        saveImage: async (input) => ({
+          attachmentId: 'sha256:e1',
+          mediaType: input.mediaType,
+          bytes: input.data.length,
+          width: 1,
+          height: 1,
+        }),
+        admitEncodedFile: async (input) => ({ attachmentId: 'sha256:f1', name: input.name, bytes: 3 }),
+        readImage: async () => {
+          throw new Error('no stored image in this sandbox');
+        },
+        imageHostPath: () => undefined,
+        fileHostPath: () => undefined,
+        readFileStream: async function* () {
+          yield new Uint8Array([0x7a, 0x69, 0x70]);
+        },
+      };
+    },
+  };
+  const state = T.emptyState();
+  const project = T.projectCreate(state, { title: '携带附件的树' });
+  const root = T.cardCreate(state, { projectId: project.id, mode: 'root', prompt: 'root' });
+  const child = T.cardCreate(state, { projectId: project.id, parentId: root.id, mode: 'child', prompt: 'child' });
+  root.title = '手动名字';
+  root.titleManual = true;
+  root.attachments = await T.prepareAttachments(ctx, [
+    { name: 'note.md', mime: 'text/markdown', dataB64: Buffer.from('# hello zip').toString('base64') },
+    { name: 'blob.bin', mime: 'application/octet-stream', dataB64: Buffer.from('zip').toString('base64') },
+  ]);
+
+  const bundle = await T.buildExportZip(ctx, project);
+  assert(bundle.zip.length > 100, 'zip should not be empty');
+  const files = T.readZip(bundle.zip);
+  assert(files.has('project.json'), 'project.json missing from the archive');
+  const payload = JSON.parse(files.get('project.json').toString('utf8'));
+  let attachmentEntries = 0;
+  for (const entry of files.keys()) if (entry.startsWith('attachments/')) attachmentEntries += 1;
+  assert(attachmentEntries === 2, 'both attachments should ride along, got ' + attachmentEntries);
+  assert(payload.project.cards[0].title === '手动名字', 'manual title should survive');
+  assert(payload.project.cards[0].titleManual === true, 'titleManual flag should survive');
+
+  // Import the bundle back: attachments go through the admission paths again.
+  const target = T.emptyState();
+  await T.projectImportBundle(ctx, target, { dataB64: bundle.zip.toString('base64') });
+  assert(target.projects.length === 1, 'import should add one project');
+  const revived = target.projects[0];
+  assert(revived.cards.length === 2, 'import should keep both cards');
+  const revivedRoot = revived.cards.find((card) => card.id === root.id) || revived.cards[0];
+  assert(revivedRoot.title === '手动名字' && revivedRoot.titleManual === true, 'manual title lost on import');
+  assert(Array.isArray(revivedRoot.attachments) && revivedRoot.attachments.length === 2, 'attachments lost on import');
+  assert(revivedRoot.attachments[0].kind === 'text' && revivedRoot.attachments[0].file, 'text attachment not re-spilled');
+  assert(revivedRoot.attachments[1].kind === 'file' && revivedRoot.attachments[1].ref, 'file attachment not re-admitted');
+  const blocks = T.attachmentBlocks(revivedRoot.attachments);
+  assert(String(blocks[0].text).includes('hello zip'), 're-imported text should read back');
+  return '2 attachments + title survived';
+});
+
+await checkAsync('backup list / restore', async () => {
+  const state = T.emptyState();
+  T.projectCreate(state, { title: 'Before backup' });
+  T.saveState(state);
+  // saveState throttles snapshots to one per 5 minutes, so force one now and
+  // restore exactly that file — deterministic even inside a busy sandbox.
+  T.forceBackup(T.stateFilePath());
+  const list = T.listBackups();
+  assert(Array.isArray(list) && list.length > 0, 'forceBackup should leave a snapshot');
+  const mine = list[0];
+  assert(mine.projects === 1, 'the snapshot should hold exactly one project');
+  T.projectCreate(state, { title: 'After backup' });
+  T.saveState(state);
+  const controllers = new Map();
+  T.restoreBackup(controllers, state, mine.file);
+  const names = state.projects.map((project) => project.title);
+  assert(
+    names.includes('Before backup') && !names.includes('After backup'),
+    'restore should rewind the state, got: ' + names.join(', '),
+  );
+  const current = T.listBackups()[0];
+  assert(current.file !== mine.file, 'restore should safety-copy the replaced state first');
+  return 'rewound to ' + mine.file;
+});
+
+await checkAsync('manual title beats auto title', async () => {
+  const state = T.emptyState();
+  const project = T.projectCreate(state, { title: 'Manual' });
+  const card = T.cardCreate(state, { projectId: project.id, mode: 'root', prompt: 'root' });
+  T.cardUpdate(state, { projectId: project.id, cardId: card.id, answer: 'some answer' });
+  T.cardUpdate(state, { projectId: project.id, cardId: card.id, title: '  我自己起的名字  ' });
+  assert(card.title === '我自己起的名字' && card.titleManual === true, 'manual rename should stick');
+  T.cardUpdate(state, { projectId: project.id, cardId: card.id, title: '   ' });
+  assert(card.title === '' && card.titleManual === false, 'clearing the title should hand naming back');
+  const loaded = T.loadState();
+  void loaded;
+  return 'set / clear round-trip';
 });
 
 try {

@@ -139,9 +139,24 @@ window.__ModuleLoader__.load({
         continueLabel: '继续',
         continuePrompt: '请接着上面中断的地方继续。',
         searchPlaceholder: '搜索卡片',
-        exportLabel: '导出项目 JSON',
-        importLabel: '导入项目 JSON',
+        exportLabel: '导出项目 ZIP',
+        importLabel: '导入项目（JSON / ZIP）',
         importFailed: '导入失败：',
+        backupsLabel: '从备份恢复',
+        backupsTitle: '从备份恢复',
+        backupsEmpty: '还没有备份文件。',
+        backupRestore: '恢复',
+        backupRestored: '已恢复备份',
+        backupHint: '恢复会用这份备份整体替换当前状态；替换前的状态会先自动再备份一份。',
+        countProjects: '个项目',
+        renameLabel: '改名',
+        renamePrompt: '输入新标题（清空则恢复自动起名）',
+        renameCleared: '已恢复自动起名',
+        detachLabel: '脱离父级',
+        detachConfirm: '脱离父级？',
+        detachHint: '这张卡片（连同它的子树）会变成一棵新的树根。',
+        detached: '已脱离父级',
+        staleSynced: '状态在别处被修改过，已自动同步最新内容。',
         compatTitle: '运行环境不完整：',
         compatMissingSeats: '缺少界面座位',
         compatMissingServices: '缺少服务',
@@ -160,8 +175,8 @@ window.__ModuleLoader__.load({
         helpItem2: '输入框左下角的胶囊可以换成：追问（同一张卡里接着问，不新增节点）、发散（同层另起一线）、独立（一张不连树的卡）。',
         helpItem3: '卡片动作里的「重答 ▾」还藏着一个「分支重答」：保留旧答案，从同一个问题另开一支。',
         helpItem4: '顶栏「全览」进结构图：拖节点摆位置、拖 ↗ 改父级、拖 ⇢ 建引用（虚线，点线可删）、「自动排列」还原。',
-        helpItem5: '数据只存在本机 ~/.dsh/card-tree/；用「⋯ → 导出项目 JSON」可以备份或换机。',
-        helpKeys: 'Enter 发送 · Ctrl / ⌘ + Enter 换行 · Esc 关闭浮层',
+        helpItem5: '数据只存在本机 ~/.dsh/card-tree/；用「⋯ → 导出项目 ZIP」可以把整棵树连同附件备份或搬去别的机器。',
+        helpKeys: 'Enter 发送 · Ctrl / ⌘ + Enter 换行 · Esc 关闭浮层 · / 聚焦搜索 · ↑ ↓ 选卡片 · Del 删除',
         helpStart: '开始使用',
       },
       en: {
@@ -281,9 +296,24 @@ window.__ModuleLoader__.load({
         continueLabel: 'Continue',
         continuePrompt: 'Please continue from where the answer was cut off.',
         searchPlaceholder: 'Search cards',
-        exportLabel: 'Export project as JSON',
-        importLabel: 'Import a project JSON',
+        exportLabel: 'Export project as ZIP',
+        importLabel: 'Import a project (JSON / ZIP)',
         importFailed: 'Import failed: ',
+        backupsLabel: 'Restore from backup',
+        backupsTitle: 'Restore from backup',
+        backupsEmpty: 'No backup files yet.',
+        backupRestore: 'Restore',
+        backupRestored: 'Backup restored',
+        backupHint: 'Restoring replaces the whole state with the snapshot; the current state is backed up first.',
+        countProjects: 'projects',
+        renameLabel: 'Rename',
+        renamePrompt: 'New title (clear it to hand naming back to the model)',
+        renameCleared: 'Automatic naming restored',
+        detachLabel: 'Detach',
+        detachConfirm: 'Detach from its parent?',
+        detachHint: 'This card (with its subtree) becomes a new root of its own.',
+        detached: 'Detached from its parent',
+        staleSynced: 'State was changed elsewhere; synced to the latest.',
         compatTitle: 'Incomplete runtime: ',
         compatMissingSeats: 'missing seats',
         compatMissingServices: 'missing services',
@@ -302,8 +332,8 @@ window.__ModuleLoader__.load({
         helpItem2: 'The capsule in the composer switches direction: Follow up (keep asking inside this card, no new node), Diverge (a new line at the same level), Standalone (a card not connected to the tree).',
         helpItem3: 'The “Retry ▾” menu on a card hides Branch answer: keep the current answer and open a sibling card from the same question.',
         helpItem4: '“Overview” in the top bar opens the structure: drag nodes to place them, drag ↗ to re-hang, drag ⇢ to reference (dashed edge, click it to drop), “Auto arrange” resets.',
-        helpItem5: 'Everything lives on this machine under ~/.dsh/card-tree/; “⋯ → Export project as JSON” backs it up or moves it.',
-        helpKeys: 'Enter to send · Ctrl / ⌘ + Enter for a new line · Esc closes overlays',
+        helpItem5: 'Everything lives on this machine under ~/.dsh/card-tree/; “⋯ → Export project as ZIP” backs the tree up — attachments included — or moves it to another machine.',
+        helpKeys: 'Enter to send · Ctrl / ⌘ + Enter for a new line · Esc closes overlays · / focuses search · ↑ ↓ pick a card · Del removes',
         helpStart: 'Start',
       },
     };
@@ -490,6 +520,7 @@ window.__ModuleLoader__.load({
         runs: {},
         contexts: {},
         search: '',
+        revision: 0,
         health: { status: 'idle', version: '', services: null, missing: [] },
         seatIssues: [],
       };
@@ -551,12 +582,14 @@ window.__ModuleLoader__.load({
         const active = data.projects.find((project) => project.id === data.activeProjectId) || data.projects[0] || null;
         if (active && data.activeProjectId !== active.id) data.activeProjectId = active.id;
         const stillThere = active && active.cards.some((card) => card.id === state.selectedCardId);
+        const revision = Number(payload.revision);
         patch({
           phase: 'ready',
           data,
           model: payload.model || null,
           autoTitle: payload.autoTitle !== false,
           error: null,
+          revision: isFinite(revision) ? revision : state.revision,
           selectedCardId: stillThere ? state.selectedCardId : null,
         });
       }
@@ -635,6 +668,61 @@ window.__ModuleLoader__.load({
 
       async function restoreProject(project) {
         return importProject(project);
+      }
+
+      /** Download the current project as one ZIP with its attachments inside. */
+      async function exportZip() {
+        const project = activeProject();
+        if (!project) return;
+        const response = await fetch(API + '/export?projectId=' + encodeURIComponent(project.id));
+        if (!response.ok) throw new Error('导出失败（HTTP ' + response.status + '）');
+        triggerDownload(await response.blob(), (project.title || 'card-tree') + '.zip');
+      }
+
+      /** Import a ZIP bundle (project.json + attachments) produced by /export. */
+      async function importBundle(dataB64) {
+        patch({ error: null });
+        try {
+          applySnapshot(await call('/project', { op: 'import-bundle', dataB64 }));
+          patch({ notice: t().undoDone });
+          return true;
+        } catch (error) {
+          patch({ error: t().importFailed + String((error && error.message) || error) });
+          return false;
+        }
+      }
+
+      /** Rolling state snapshots kept by the Host, newest first. */
+      async function listBackups() {
+        const payload = await call('/backups');
+        return Array.isArray(payload.backups) ? payload.backups : [];
+      }
+
+      /** Swap the whole state for one backup file (the Host saves a safety copy first). */
+      async function restoreBackup(file) {
+        applySnapshot(await call('/backup', { op: 'restore', file }));
+      }
+
+      /** Another tab may have written newer state; pull it when we were stale. */
+      async function checkFresh() {
+        if (Object.keys(state.streaming).length) return;
+        try {
+          const payload = await call('/state');
+          const revision = Number(payload.revision);
+          if (isFinite(revision) && revision > state.revision) {
+            applySnapshot(payload);
+            patch({ notice: t().staleSynced });
+          }
+        } catch (error) {
+          /* the panel is hidden or the Host is restarting; nothing to do */
+        }
+      }
+
+      /** Rename a card by hand; an empty title hands naming back to the model. */
+      async function renameCard(cardId, title) {
+        const project = activeProject();
+        if (!project) return;
+        applySnapshot(await call('/card', { op: 'update', projectId: project.id, cardId, title }));
       }
 
       async function deleteProject() {
@@ -1345,6 +1433,12 @@ window.__ModuleLoader__.load({
         flushProjectSave,
         importProject,
         restoreProject,
+        exportZip,
+        importBundle,
+        listBackups,
+        restoreBackup,
+        checkFresh,
+        renameCard,
         deleteProject,
         createCard,
         createFollow,
@@ -1386,6 +1480,18 @@ window.__ModuleLoader__.load({
     }
 
     const store = createStore();
+
+    /** Hand a blob to the browser as a file download. */
+    function triggerDownload(blob, name) {
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = name;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }
 
     /** Optional client services captured from the plugin context. */
     const services = { layout: null, ctx: null };
@@ -1728,6 +1834,11 @@ window.__ModuleLoader__.load({
 .ct-modal-hint{font-size:11.5px;color:var(--dsw-alias-label-secondary);margin:0}
 .ct-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
 .ct-btn--danger{color:var(--dsw-alias-state-error-primary);box-shadow:inset 0 0 0 1px var(--dsw-alias-state-error-primary)}
+.ct-backups{width:min(460px,calc(100vw - 40px));max-height:calc(100vh - 80px);overflow:auto}
+.ct-backup-list{display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow:auto;padding:2px}
+.ct-backup-row{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;background:var(--dsw-alias-bg-layer-1);box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l1)}
+.ct-backup-when{flex:0 0 auto;font-size:11.5px;color:var(--dsw-alias-label-primary);font-weight:600}
+.ct-backup-meta{flex:1 1 auto;min-width:0;font-size:11px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ct-help{width:min(520px,calc(100vw - 40px));max-height:calc(100vh - 80px);overflow:auto}
 .ct-help-lead{margin:0;font-size:12.5px;line-height:1.7;color:var(--dsw-alias-label-secondary)}
 .ct-help-list{margin:2px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:8px;font-size:12.5px;line-height:1.7;color:var(--dsw-alias-label-primary)}
@@ -2320,6 +2431,7 @@ window.__ModuleLoader__.load({
         'div',
         {
           className: 'ct-row' + (active ? ' ct-row--active' : ''),
+          'data-card-id': card.id,
           'data-titled': String(card.title || '').trim() ? '1' : '0',
           style: { marginLeft: depth * 13 + 'px' },
           onClick: () => props.onSelect(card),
@@ -2855,9 +2967,16 @@ window.__ModuleLoader__.load({
           } catch (error) {
             targetId = null;
           }
-          if (!targetId || targetId === current.fromId) return;
           const fromCard = cards.find((item) => item.id === current.fromId) || null;
           if (!fromCard) return;
+          if (!targetId) {
+            /* Dropping a parent link on empty canvas offers to make the card a new root. */
+            if (current.kind === 'parent' && fromCard.parentId && typeof props.onDetach === 'function') {
+              props.onDetach(fromCard);
+            }
+            return;
+          }
+          if (targetId === current.fromId) return;
           if (current.kind === 'ref') {
             if (typeof props.onAddRef === 'function') props.onAddRef(fromCard, targetId);
             return;
@@ -3357,6 +3476,31 @@ window.__ModuleLoader__.load({
                 title: strings.addRef,
                 items: refItems,
               }),
+          running
+            ? null
+            : h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'ct-btn ct-btn--sm',
+                  title: strings.renameLabel,
+                  onClick: () => props.onRename(card),
+                },
+                GlyphSliders(13),
+                strings.renameLabel,
+              ),
+          running ? null : card.parentId
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'ct-btn ct-btn--sm',
+                  title: strings.detachHint,
+                  onClick: () => props.onDetach(card),
+                },
+                strings.detachLabel,
+              )
+            : null,
           h('span', { className: 'ct-spacer' }),
           h(
             'button',
@@ -3580,9 +3724,12 @@ window.__ModuleLoader__.load({
       }
 
       const rootRef = React.useRef(null);
+      const searchRef = React.useRef(null);
       const [doomed, setDoomed] = React.useState(null);
       const [deletedProject, setDeletedProject] = React.useState(null);
       const [help, setHelp] = React.useState(() => !readHelpSeen());
+      const [backups, setBackups] = React.useState(null);
+      const [detach, setDetach] = React.useState(null);
       const importRef = React.useRef(null);
       React.useEffect(() => {
         store.load();
@@ -3606,6 +3753,7 @@ window.__ModuleLoader__.load({
           store.loadModels(true).catch(() => {
             /* keep the cached list on failure */
           });
+          store.checkFresh();
         };
         const onVisible = () => {
           if (!document.hidden) refresh();
@@ -3641,6 +3789,14 @@ window.__ModuleLoader__.load({
             closeHelp();
             return;
           }
+          if (backups) {
+            setBackups(null);
+            return;
+          }
+          if (detach) {
+            setDetach(null);
+            return;
+          }
           if (doomed) {
             setDoomed(null);
             return;
@@ -3662,7 +3818,81 @@ window.__ModuleLoader__.load({
         };
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
-      }, [doomed, help]);
+      }, [doomed, help, backups, detach]);
+
+      /* List keyboard: "/" focuses search, arrows walk the visible rows, Del removes. */
+      React.useEffect(() => {
+        const onKeyDown = (event) => {
+          const live = store.get();
+          if (live.overview || doomed || help || backups || detach) return;
+          const target = event.target;
+          const tag = target && target.tagName ? String(target.tagName).toLowerCase() : '';
+          if (tag === 'input' || tag === 'textarea' || (target && target.isContentEditable)) return;
+          if (event.ctrlKey || event.metaKey || event.altKey) return;
+          if (event.key === '/') {
+            const node = searchRef.current;
+            if (node) {
+              event.preventDefault();
+              node.focus();
+              node.select && node.select();
+            }
+            return;
+          }
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            const project = live.data.projects.find((entry) => entry.id === live.data.activeProjectId) || null;
+            if (!project) return;
+            const order = visibleOrder(project, live.collapsed, live.search);
+            if (!order.length) return;
+            event.preventDefault();
+            const at = order.indexOf(live.selectedCardId);
+            const next = event.key === 'ArrowDown'
+              ? order[Math.min(order.length - 1, at + 1)]
+              : order[Math.max(0, at <= 0 ? 0 : at - 1)];
+            if (next && next !== live.selectedCardId) {
+              store.patch({ selectedCardId: next });
+              const node = rootRef.current && rootRef.current.querySelector('[data-card-id="' + next + '"]');
+              if (node && node.scrollIntoView) node.scrollIntoView({ block: 'nearest' });
+            } else if (at < 0) {
+              store.patch({ selectedCardId: order[0] });
+              const node = rootRef.current && rootRef.current.querySelector('[data-card-id="' + order[0] + '"]');
+              if (node && node.scrollIntoView) node.scrollIntoView({ block: 'nearest' });
+            }
+            return;
+          }
+          if (event.key === 'Delete' || event.key === 'Backspace') {
+            const card = selected;
+            if (card) {
+              event.preventDefault();
+              requestDelete(card);
+            }
+          }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+      });
+
+      /** Row order as the list shows it: collapses skipped, search flattens the tree. */
+      function visibleOrder(project, folded, search) {
+        const out = [];
+        const term = String(search || '').trim().toLowerCase();
+        const walk = (parentId, depth) => {
+          for (const card of project.cards) {
+            if (card.parentId !== parentId) continue;
+            out.push(card.id);
+            if (folded && folded[card.id]) continue;
+            walk(card.id, depth + 1);
+          }
+        };
+        if (term) {
+          for (const card of project.cards) {
+            const hay = (String(card.prompt || '') + ' ' + String(card.answer || '')).toLowerCase();
+            if (hay.includes(term)) out.push(card.id);
+          }
+          return out;
+        }
+        walk(null, 0);
+        return out;
+      }
 
       function flushProjectSaveQuiet() {
         try {
@@ -3839,6 +4069,7 @@ window.__ModuleLoader__.load({
             { separator: true },
             { label: strings.exportLabel, onClick: exportProject },
             { label: strings.importLabel, onClick: () => importRef.current && importRef.current.click() },
+            { label: strings.backupsLabel, onClick: openBackups },
             { separator: true },
             { label: strings.newProject, onClick: newProject },
             {
@@ -3862,30 +4093,34 @@ window.__ModuleLoader__.load({
         : [
             { label: strings.newProject, onClick: newProject },
             { label: strings.importLabel, onClick: () => importRef.current && importRef.current.click() },
+            { label: strings.backupsLabel, onClick: openBackups },
           ];
 
       function exportProject() {
         if (!project) return;
-        try {
-          const payload = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), project }, null, 2);
-          const blob = new Blob([payload], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = (project.title || 'card-tree').replace(/[\\/:*?"<>|]+/g, '_') + '.json';
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 1500);
-        } catch (error) {
+        store.exportZip().catch((error) => {
           store.patch({ error: String((error && error.message) || error) });
-        }
+        });
       }
 
       function pickImport(event) {
         const file = event.target.files && event.target.files[0];
         event.target.value = '';
         if (!file) return;
+        if (/\.zip$/i.test(file.name) || file.type === 'application/zip') {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const bytes = new Uint8Array(reader.result || new ArrayBuffer(0));
+            let binary = '';
+            for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+            store.importBundle(btoa(binary)).then((ok) => {
+              if (ok) store.patch({ selectedCardId: null, overview: false });
+            });
+          };
+          reader.onerror = () => store.patch({ error: strings.importFailed + String(reader.error || '') });
+          reader.readAsArrayBuffer(file);
+          return;
+        }
         const reader = new FileReader();
         reader.onload = () => {
           try {
@@ -3910,6 +4145,46 @@ window.__ModuleLoader__.load({
         store.restoreProject(copy).then((ok) => {
           if (ok) store.patch({ notice: strings.undoDone });
         });
+      }
+
+      function openBackups() {
+        setBackups({ loading: true, list: [], error: null });
+        store
+          .listBackups()
+          .then((list) => setBackups({ loading: false, list, error: null }))
+          .catch((error) => setBackups({ loading: false, list: [], error: String((error && error.message) || error) }));
+      }
+
+      function restoreFromBackup(file) {
+        if (!file) return;
+        store
+          .restoreBackup(file)
+          .then(() => {
+            setBackups(null);
+            store.patch({ notice: strings.backupRestored, selectedCardId: null, overview: false });
+          })
+          .catch((error) => setBackups({ loading: false, list: [], error: String((error && error.message) || error) }));
+      }
+
+      function confirmDetach() {
+        const card = detach && detach.card;
+        setDetach(null);
+        if (!card) return;
+        store.reparentCard(card.id, null).then(
+          () => store.patch({ notice: strings.detached }),
+          (error) => store.patch({ error: String((error && error.message) || error) }),
+        );
+      }
+
+      function renameCardPrompt(card) {
+        const next = window.prompt(strings.renamePrompt, String(card.title || titleOf(card)));
+        if (next === null) return;
+        store.renameCard(card.id, next).then(
+          () => {
+            if (!String(next).trim()) store.patch({ notice: strings.renameCleared });
+          },
+          (error) => store.patch({ error: String((error && error.message) || error) }),
+        );
       }
 
       const samples = [strings.sampleOne, strings.sampleTwo, strings.sampleThree];
@@ -4001,7 +4276,7 @@ window.__ModuleLoader__.load({
           ref: importRef,
           className: 'ct-import-input',
           type: 'file',
-          accept: 'application/json,.json',
+          accept: 'application/json,.json,application/zip,.zip',
           tabIndex: -1,
           'aria-hidden': 'true',
           onChange: pickImport,
@@ -4211,6 +4486,106 @@ window.__ModuleLoader__.load({
               ),
             )
           : null,
+        detach
+          ? h(
+              'div',
+              { className: 'ct-modal-backdrop', onClick: () => setDetach(null) },
+              h(
+                'div',
+                {
+                  className: 'ct-modal',
+                  role: 'dialog',
+                  'aria-modal': 'true',
+                  onClick: (event) => event.stopPropagation(),
+                },
+                h('h3', { className: 'ct-modal-title' }, strings.detachConfirm),
+                h('p', { className: 'ct-modal-body' }, detach.card ? detach.card.prompt || '' : ''),
+                h('p', { className: 'ct-modal-hint' }, strings.detachHint),
+                h(
+                  'div',
+                  { className: 'ct-modal-actions' },
+                  h(
+                    'button',
+                    { type: 'button', className: 'ct-btn ct-btn--sm', onClick: () => setDetach(null) },
+                    strings.cancel,
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'ct-btn ct-btn--sm',
+                      onClick: confirmDetach,
+                    },
+                    strings.detachLabel,
+                  ),
+                ),
+              ),
+            )
+          : null,
+        backups
+          ? h(
+              'div',
+              { className: 'ct-modal-backdrop', onClick: () => setBackups(null) },
+              h(
+                'div',
+                {
+                  className: 'ct-modal ct-backups',
+                  role: 'dialog',
+                  'aria-modal': 'true',
+                  'aria-label': strings.backupsTitle,
+                  onClick: (event) => event.stopPropagation(),
+                },
+                h('h3', { className: 'ct-modal-title' }, strings.backupsTitle),
+                backups.loading
+                  ? h('p', { className: 'ct-modal-hint' }, strings.loading)
+                  : backups.error
+                    ? h('p', { className: 'ct-modal-hint' }, strings.importFailed + backups.error)
+                    : backups.list.length === 0
+                      ? h('p', { className: 'ct-modal-hint' }, strings.backupsEmpty)
+                      : h(
+                          'div',
+                          { className: 'ct-backup-list' },
+                          backups.list.map((entry) =>
+                            h(
+                              'div',
+                              { key: entry.file, className: 'ct-backup-row' },
+                              h(
+                                'span',
+                                { className: 'ct-backup-when' },
+                                when(entry.savedAt),
+                              ),
+                              h(
+                                'span',
+                                { className: 'ct-backup-meta' },
+                                'r' + (entry.revision || 0) + ' · ' +
+                                  (entry.projects || 0) + ' ' + strings.countProjects + ' · ' +
+                                  (entry.cards || 0) + ' ' + strings.countCards,
+                              ),
+                              h(
+                                'button',
+                                {
+                                  type: 'button',
+                                  className: 'ct-btn ct-btn--sm',
+                                  onClick: () => restoreFromBackup(entry.file),
+                                },
+                                strings.backupRestore,
+                              ),
+                            ),
+                          ),
+                        ),
+                h('p', { className: 'ct-modal-hint' }, strings.backupHint),
+                h(
+                  'div',
+                  { className: 'ct-modal-actions' },
+                  h(
+                    'button',
+                    { type: 'button', className: 'ct-btn ct-btn--sm', onClick: () => setBackups(null) },
+                    strings.cancel,
+                  ),
+                ),
+              ),
+            )
+          : null,
         state.phase === 'loading'
           ? h('div', { className: 'ct-empty' }, h('p', null, strings.loading))
           : state.phase === 'error'
@@ -4254,6 +4629,7 @@ window.__ModuleLoader__.load({
                         onSelect: selectCard,
                         onMove: moveNode,
                         onReparent: reparentNode,
+                        onDetach: (card) => setDetach({ card }),
                         onReset: resetNodeLayout,
                         onRequestDelete: requestDelete,
                         onAddRef: addRef,
@@ -4275,6 +4651,7 @@ window.__ModuleLoader__.load({
                     h('input', {
                       className: 'ct-search',
                       type: 'search',
+                      ref: searchRef,
                       value: state.search,
                       placeholder: strings.searchPlaceholder,
                       'aria-label': strings.searchPlaceholder,
@@ -4351,6 +4728,8 @@ window.__ModuleLoader__.load({
                               contextInfo: state.contexts[selected.id] || selected.stats || null,
                               onRebranch: (card) => store.rebranch(card),
                               onRerun: (card) => store.rerun(card),
+                              onRename: renameCardPrompt,
+                              onDetach: (card) => setDetach({ card }),
                               onCopy: (card, body) => store.copyCard(card, body),
                               onRemove: (card) => {
                                 if (window.confirm(strings.confirmDeleteCard)) store.removeCard(card);

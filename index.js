@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 
 const ROUTE_PREFIX = '/dsh-card-tree';
 const STATE_VERSION = 1;
@@ -164,10 +165,10 @@ function toolCallAllowed(call) {
   if (!isReadonlyTool(call.name)) {
     return { ok: false, reason: '工具 ' + call.name + ' 不在只读白名单内，已拒绝执行' };
   }
-  const allowed = allowedParamsFor(call.name);
-  if (!allowed) return { ok: true };
   const args = toolCallArgs(call);
   if (args === null) return { ok: false, reason: call.name + ' 的参数不是合法 JSON，已拒绝执行' };
+  const allowed = allowedParamsFor(call.name);
+  if (!allowed) return { ok: true };
   const action = typeof args.action === 'string' ? args.action : '';
   if (!allowed.has(action)) {
     return {
@@ -337,6 +338,7 @@ function loadState() {
         // Dashed references survive a reload as plain id lists.
         if (!Array.isArray(card.refs)) card.refs = [];
         if (typeof card.title !== 'string') card.title = '';
+        if (typeof card.titleManual !== 'boolean') card.titleManual = Boolean(card.titleManual);
         if (typeof card.reasoning !== 'string') card.reasoning = '';
         for (const followUp of card.followUps) {
           if (typeof followUp.reasoning !== 'string') followUp.reasoning = '';
@@ -442,6 +444,81 @@ function saveState(state) {
 function findProject(state, projectId) {
   return state.projects.find((project) => project.id === projectId) || null;
 }
+
+/** One line of the backup menu: what the file holds, without loading it into memory. */
+function backupSummary(name) {
+  try {
+    const full = path.join(backupDir(), name);
+    const stat = fs.statSync(full);
+    const parsed = JSON.parse(fs.readFileSync(full, 'utf8'));
+    const projects = Array.isArray(parsed.projects) ? parsed.projects : [];
+    const cards = projects.reduce(
+      (sum, project) => sum + (Array.isArray(project.cards) ? project.cards.length : 0),
+      0,
+    );
+    return {
+      file: name,
+      savedAt: stat.mtime.toISOString(),
+      revision: Number(parsed.revision) || 0,
+      projects: projects.length,
+      cards,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+/** Newest first. Only files the backup loop itself wrote are ever offered. */
+function listBackups() {
+  try {
+    const dir = backupDir();
+    if (!fs.existsSync(dir)) return [];
+    return fs
+      .readdirSync(dir)
+      .filter((name) => /^state-[\w:.-]+\.json$/.test(name))
+      .sort()
+      .reverse()
+      .map((name) => backupSummary(name))
+      .filter(Boolean);
+  } catch (error) {
+    return [];
+  }
+}
+
+/** Copy the live file into the history right now, ignoring the 5-minute throttle. */
+function forceBackup(file) {
+  try {
+    if (!fs.existsSync(file)) return;
+    const dir = backupDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    fs.copyFileSync(file, path.join(dir, 'state-' + stamp + '.json'));
+  } catch (error) {
+    console.warn('[card-tree] could not write a safety backup:', error && error.message);
+  }
+}
+
+/**
+ * Roll the whole state back to one backup file. The in-memory object is
+ * rewritten in place (every route shares it), a safety copy of what is being
+ * replaced lands in the history first, and live generations are stopped.
+ */
+function restoreBackup(controllers, state, fileName) {
+  const safe = path.basename(String(fileName || ''));
+  if (!/^state-[\w:.-]+\.json$/.test(safe)) throw new Error('不是状态备份文件');
+  const full = path.join(backupDir(), safe);
+  if (!fs.existsSync(full)) throw new Error('备份不存在或已被清理');
+  const parsed = JSON.parse(fs.readFileSync(full, 'utf8'));
+  if (!parsed || !Array.isArray(parsed.projects)) throw new Error('备份内容不是有效的状态文件');
+
+  abortRuns(controllers, () => true);
+  forceBackup(stateFilePath());
+  for (const key of Object.keys(state)) delete state[key];
+  Object.assign(state, parsed);
+  saveState(state);
+  return state;
+}
+
 
 function findCard(project, cardId) {
   return project.cards.find((card) => card.id === cardId) || null;
@@ -1114,6 +1191,9 @@ function normalizeImportedCard(raw, fallbackParent) {
     mode,
     prompt: typeof card.prompt === 'string' ? card.prompt : '',
     answer: typeof card.answer === 'string' ? card.answer : '',
+    title: typeof card.title === 'string' ? card.title.slice(0, 60) : '',
+    titleManual: card.titleManual === true,
+    reasoning: typeof card.reasoning === 'string' ? card.reasoning : '',
     status,
     error: typeof card.error === 'string' ? card.error : null,
     createdAt: typeof card.createdAt === 'string' ? card.createdAt : nowIso(),
@@ -1128,6 +1208,7 @@ function normalizeImportedCard(raw, fallbackParent) {
             id: typeof item.id === 'string' && /^f_/.test(item.id) ? item.id : nid('f'),
             prompt: typeof item.prompt === 'string' ? item.prompt : '',
             answer: typeof item.answer === 'string' ? item.answer : '',
+            reasoning: typeof item.reasoning === 'string' ? item.reasoning : '',
             status: item.status === 'running' ? 'error' : item.status || (item.answer ? 'done' : 'idle'),
             error: typeof item.error === 'string' ? item.error : null,
             createdAt: typeof item.createdAt === 'string' ? item.createdAt : nowIso(),
@@ -1295,7 +1376,16 @@ function cardUpdate(state, body) {
   if (card.status === 'running') throw new Error('这张卡片正在生成中');
   if (typeof body.prompt === 'string') card.prompt = body.prompt.slice(0, 20000);
   if (typeof body.answer === 'string') card.answer = body.answer;
-  if (typeof body.title === 'string') card.title = cleanCardTitle(body.title).slice(0, 60);
+  if (typeof body.title === 'string') {
+    const title = body.title.trim().slice(0, 60);
+    if (title) {
+      card.title = title;
+      card.titleManual = true;
+    } else {
+      card.title = '';
+      card.titleManual = false;
+    }
+  }
   if (typeof body.status === 'string') card.status = body.status;
   if (typeof body.error === 'string' || body.error === null) card.error = body.error;
   card.updatedAt = nowIso();
@@ -1782,6 +1872,269 @@ async function generateCardTitle(ctx, state, project, card) {
   }
 }
 
+/* ------------------------------------------------------------- zip archive */
+
+const CRC_TABLE = (() => {
+  const table = new Int32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let c = i;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[i] = c;
+  }
+  return table;
+})();
+
+function crc32(buf) {
+  let crc = -1;
+  for (let i = 0; i < buf.length; i += 1) crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ buf[i]) & 0xff];
+  return (crc ^ -1) >>> 0;
+}
+
+/** The zip format stores timestamps as one DOS time and one DOS date word. */
+function dosDateTime(date) {
+  const when = date instanceof Date ? date : new Date();
+  const year = Math.max(1980, Math.min(2107, when.getFullYear()));
+  const time = ((when.getHours() << 11) | (when.getMinutes() << 5) | (when.getSeconds() >> 1)) & 0xffff;
+  const day = (((year - 1980) << 9) | ((when.getMonth() + 1) << 5) | when.getDate()) & 0xffff;
+  return { time, day };
+}
+
+/** Build a tiny ZIP (store method, UTF-8 names) — enough for an export bundle. */
+function buildZip(entries) {
+  const when = dosDateTime(new Date());
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const entry of entries || []) {
+    const nameBytes = Buffer.from(String(entry.name), 'utf8');
+    const data = Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(entry.data || '');
+    const crc = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6);
+    local.writeUInt16LE(0, 8);
+    local.writeUInt16LE(when.time, 10);
+    local.writeUInt16LE(when.day, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    local.writeUInt16LE(0, 28);
+    locals.push(local, nameBytes, data);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(0, 10);
+    central.writeUInt16LE(when.time, 12);
+    central.writeUInt16LE(when.day, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBytes.length, 28);
+    central.writeUInt16LE(0, 30);
+    central.writeUInt16LE(0, 32);
+    central.writeUInt16LE(0, 34);
+    central.writeUInt16LE(0, 36);
+    central.writeUInt32LE(0, 38);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(central, nameBytes);
+
+    offset += local.length + nameBytes.length + data.length;
+  }
+  const centralBuf = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE((entries || []).length, 8);
+  end.writeUInt16LE((entries || []).length, 10);
+  end.writeUInt32LE(centralBuf.length, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+  return Buffer.concat(locals.concat([centralBuf, end]));
+}
+
+/** Read a small ZIP into a Map<name, Buffer>; store and deflate both work. */
+function readZip(buffer) {
+  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  if (buf.length < 22) throw new Error('导入文件不是有效的 ZIP');
+  let end = -1;
+  for (let i = buf.length - 22; i >= 0 && i >= buf.length - 22 - 65535; i -= 1) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) throw new Error('导入文件不是有效的 ZIP');
+  const count = buf.readUInt16LE(end + 10);
+  let cursor = buf.readUInt32LE(end + 16);
+  const out = new Map();
+  for (let i = 0; i < count; i += 1) {
+    if (cursor + 46 > buf.length || buf.readUInt32LE(cursor) !== 0x02014b50) break;
+    const method = buf.readUInt16LE(cursor + 10);
+    const compressedSize = buf.readUInt32LE(cursor + 20);
+    const nameLen = buf.readUInt16LE(cursor + 28);
+    const extraLen = buf.readUInt16LE(cursor + 30);
+    const commentLen = buf.readUInt16LE(cursor + 32);
+    const localOffset = buf.readUInt32LE(cursor + 42);
+    const name = buf.slice(cursor + 46, cursor + 46 + nameLen).toString('utf8');
+    cursor += 46 + nameLen + extraLen + commentLen;
+    if (!name || name.startsWith('/') || name.includes('..')) continue;
+    if (localOffset + 30 > buf.length || buf.readUInt32LE(localOffset) !== 0x04034b50) continue;
+    const localNameLen = buf.readUInt16LE(localOffset + 26);
+    const localExtraLen = buf.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + localNameLen + localExtraLen;
+    const data = buf.slice(dataStart, dataStart + compressedSize);
+    if (method === 0) out.set(name, Buffer.from(data));
+    else if (method === 8) out.set(name, zlib.inflateRawSync(data));
+  }
+  if (out.size === 0) throw new Error('ZIP 里没有可读取的内容');
+  return out;
+}
+
+/** A name that is safe to nest into an archive and to show on Windows. */
+function safeFileName(name) {
+  const cleaned = String(name || 'file')
+    .replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_')
+    .trim();
+  return cleaned.slice(0, 80) || 'file';
+}
+
+/** Guess an image media type from the leading bytes (exports may lack a mime). */
+function sniffImageMediaType(data) {
+  if (data.length >= 8 && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47) return 'image/png';
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'image/jpeg';
+  if (
+    data.length >= 12 &&
+    data.slice(0, 4).toString('latin1') === 'RIFF' &&
+    data.slice(8, 12).toString('latin1') === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  if (data.length >= 6 && data.slice(0, 3).toString('latin1') === 'GIF') return 'image/gif';
+  return null;
+}
+
+/** Bytes of one stored attachment, whatever its kind. Null when unreadable. */
+async function attachmentBytes(ctx, item) {
+  if (!item) return null;
+  try {
+    if (item.kind === 'text') return Buffer.from(readTextAttachment(item), 'utf8');
+    let service = null;
+    try {
+      service = ctx.get('attachments') || null;
+    } catch (error) {
+      service = null;
+    }
+    if (!service) return null;
+    if (item.kind === 'image' && item.ref) {
+      try {
+        const stored = await service.readImage(item.ref);
+        if (stored && stored.data) return Buffer.from(stored.data);
+      } catch (error) {
+        /* fall back to the host path below */
+      }
+      const hostPath = service.imageHostPath ? service.imageHostPath(item.ref) : undefined;
+      if (hostPath && fs.existsSync(hostPath)) return fs.readFileSync(hostPath);
+      return null;
+    }
+    if (item.kind === 'file' && item.ref) {
+      const hostPath = service.fileHostPath ? service.fileHostPath(item.ref) : undefined;
+      if (hostPath && fs.existsSync(hostPath)) return fs.readFileSync(hostPath);
+      const chunks = [];
+      for await (const chunk of service.readFileStream(item.ref)) chunks.push(Buffer.from(chunk));
+      if (chunks.length) return Buffer.concat(chunks);
+      return null;
+    }
+  } catch (error) {
+    console.warn('[card-tree] could not read an attachment for export:', error && error.message);
+  }
+  return null;
+}
+
+/**
+ * Export one project as a ZIP: `project.json` plus every stored attachment
+ * under `attachments/`. The archived copy carries an `export` note on each
+ * attachment so an import can feed the bytes back through the normal
+ * admission paths instead of trusting foreign refs.
+ */
+async function buildExportZip(ctx, project) {
+  const payload = JSON.parse(JSON.stringify(project));
+  const entries = [];
+  let index = 0;
+  const carry = async (list) => {
+    for (const item of list || []) {
+      if (!item) continue;
+      const data = await attachmentBytes(ctx, item);
+      if (!data) continue;
+      index += 1;
+      const zipPath = 'attachments/' + String(index).padStart(2, '0') + '-' + safeFileName(item.name);
+      item.export = { path: zipPath, bytes: data.length, mediaType: item.mediaType || undefined };
+      entries.push({ name: zipPath, data });
+    }
+  };
+  for (const card of payload.cards || []) {
+    await carry(card.attachments);
+    for (const followUp of card.followUps || []) await carry(followUp.attachments);
+  }
+  entries.unshift({
+    name: 'project.json',
+    data: Buffer.from(JSON.stringify({ version: 1, exportedAt: nowIso(), project: payload }, null, 2), 'utf8'),
+  });
+  return { zip: buildZip(entries), title: payload.title || 'card-tree' };
+}
+
+/** Put one imported attachment back into local storage; returns the new record. */
+async function restoreImportedAttachment(ctx, item, data) {
+  const name = String((item && item.name) || 'file').slice(0, 160);
+  if (item && item.kind === 'text') return storeTextAttachment(name, data);
+  let service = null;
+  try {
+    service = ctx.get('attachments') || null;
+  } catch (error) {
+    service = null;
+  }
+  if (!service) throw new Error('导入附件需要 DSH 的附件服务：' + name);
+  if (item && item.kind === 'image') {
+    const mediaType = normalizeImageMediaType(item.mediaType || sniffImageMediaType(data) || '');
+    const ref = await service.saveImage({ data, mediaType, name });
+    return { kind: 'image', name, bytes: data.length, mediaType, ref };
+  }
+  const ref = await service.admitEncodedFile({ data: data.toString('base64'), name });
+  return { kind: 'file', name, bytes: data.length, ref };
+}
+
+/** Import a `buildExportZip` bundle: unpack, re-admit attachments, projectImport. */
+async function projectImportBundle(ctx, state, body) {
+  const dataB64 = String((body && body.dataB64) || '');
+  if (!dataB64) throw new Error('缺少导入内容');
+  const files = readZip(Buffer.from(dataB64, 'base64'));
+  const payloadName = ['project.json', 'Project.json'].find((name) => files.has(name));
+  if (!payloadName) throw new Error('ZIP 里没有 project.json');
+  const parsed = JSON.parse(files.get(payloadName).toString('utf8'));
+  const raw = parsed && parsed.project ? parsed.project : parsed;
+  if (!raw || typeof raw !== 'object') throw new Error('导入内容不是项目');
+
+  const restoreList = async (list) => {
+    for (let i = 0; i < (list || []).length; i += 1) {
+      const item = list[i];
+      if (!item || !item.export || typeof item.export.path !== 'string') continue;
+      const data = files.get(item.export.path);
+      if (!data) continue;
+      list[i] = await restoreImportedAttachment(ctx, item, data);
+    }
+  };
+  for (const card of raw.cards || []) {
+    await restoreList(card.attachments);
+    for (const followUp of card.followUps || []) await restoreList(followUp.attachments);
+  }
+  return projectImport(state, { project: raw });
+}
+
 /* ---------------------------------------------------------------- routing */
 
 async function handleRequest(ctx, state, controllers, req, res) {
@@ -1829,11 +2182,37 @@ async function handleRequest(ctx, state, controllers, req, res) {
     );
   }
 
+  if (req.method === 'GET' && route === '/export') {
+    const project = findProject(state, url.searchParams.get('projectId') || '');
+    if (!project) return sendJson(res, 404, { ok: false, error: '项目不存在' });
+    const bundle = await buildExportZip(ctx, project);
+    const fileName = encodeURIComponent(safeFileName(bundle.title) + '.zip');
+    res.writeHead(200, {
+      'Content-Type': 'application/zip',
+      'Content-Length': String(bundle.zip.length),
+      'Content-Disposition': "attachment; filename*=UTF-8''" + fileName,
+    });
+    return res.end(bundle.zip);
+  }
+
+  if (req.method === 'GET' && route === '/backups') {
+    return sendJson(res, 200, { ok: true, backups: listBackups() });
+  }
+
   if (req.method !== 'POST') {
     return sendJson(res, 405, { ok: false, error: '只支持 GET /state 与 POST 操作' });
   }
 
   const body = await readBody(req);
+
+  if (route === '/backup') {
+    const op = body.op;
+    if (op === 'restore') {
+      restoreBackup(controllers, state, String(body.file || ''));
+      return sendJson(res, 200, snapshot(ctx, state));
+    }
+    throw new Error('未知的备份操作');
+  }
 
   if (route === '/model') {
     const op = body.op || 'set';
@@ -1869,6 +2248,9 @@ async function handleRequest(ctx, state, controllers, req, res) {
     if (!project) throw new Error('项目不存在');
     const card = findCard(project, body.cardId);
     if (!card) throw new Error('卡片不存在');
+    if (card.titleManual) {
+      return sendJson(res, 400, { ok: false, error: '这张卡片是手动命名的，已不再自动起标题' });
+    }
     if (!String(card.answer || '').trim()) {
       return sendJson(res, 400, { ok: false, error: '这张卡片还没有回答，暂时不能起标题' });
     }
@@ -1898,6 +2280,7 @@ async function handleRequest(ctx, state, controllers, req, res) {
       project.updatedAt = nowIso();
     }
     else if (op === 'import') projectImport(state, body);
+    else if (op === 'import-bundle') await projectImportBundle(ctx, state, body);
     else if (op === 'delete') {
       abortRuns(controllers, (entry) => entry.projectId === body.projectId);
       projectDelete(state, body);
@@ -2197,9 +2580,12 @@ export const __test = {
   ancestorChain,
   answeredFollowUps,
   attachmentBlocks,
+  backupSummary,
+  buildExportZip,
   buildFlattenedMessages,
   buildMessages,
   buildSystem,
+  buildZip,
   cardBlocks,
   cardCreate,
   cardDelete,
@@ -2209,15 +2595,19 @@ export const __test = {
   cardRefs,
   cardUpdate,
   cleanCardTitle,
+  crc32,
+  dosDateTime,
   emptyState,
   findCard,
   findFollowUp,
   findProject,
   followUpBlocks,
   foldAnswer,
+  forceBackup,
   estimateTokens,
   isDescendant,
   isReadonlyTool,
+  listBackups,
   loadState,
   localToolConfigPath,
   looksTextual,
@@ -2228,15 +2618,20 @@ export const __test = {
   projectCreate,
   projectDelete,
   projectImport,
+  projectImportBundle,
   projectUpdate,
   pruneRefs,
   readLocalToolConfig,
   readonlyStats,
+  readZip,
   reloadLocalToolConfig,
   resolvedRefs,
+  restoreBackup,
+  safeFileName,
   saveState,
   sessionBind,
   sessionUnbind,
+  sniffImageMediaType,
   stateFilePath,
   toolCallAllowed,
   toolCallArgs,

@@ -50,6 +50,7 @@
           "mode": "root" | "child" | "diverge" | "branch" | "isolated",
           "prompt": "问题",
           "title": "模型按回答起的短标题（空则回退到问题首行；/title 写入）",
+          "titleManual": false,                     // true = 手动改名过，自动起名停用
           "answer": "回答（Markdown）",
           "reasoning": "模型的思考过程（纯文本，可空；追问各存各的）",
           "status": "idle" | "running" | "done" | "partial" | "error",
@@ -91,6 +92,8 @@
 - `parentId` 是树的唯一真相，兄弟顺序 = 数组顺序。
 - `card.pos`（可选）只是全览的手动坐标，不参与任何上下文装配；`{op:'layout'}` 写、`'reset'` 清。
 - 改父节点走 `{op:'reparent'}`：会拒绝成环（`isDescendant`）和 `running` 中的卡片，并把 `mode` 同步成 `child`/`root`。
+  `parentId: null`（全览 ↗ 拖到空白、详情「脱离父级」）= 脱离成新树根，同一套校验。
+- `titleManual` 为 true 的卡片不参与自动起名（`/title` 返回 400）；`{op:'update', title:''}` 清空即交还自动。
 - `mode: "isolated"` 的卡片 `parentId` 恒为 `null`，不继承任何上下文；之后仍可在全览里用 ↗ 手柄手工挂到树上。
 - `followUps` 只是卡片内部的问答线程：不进 `childrenOf`、不参与树结构、不影响 `parentId`；追问的上下文 =
   祖先链 + 本卡片问答 + 本卡片里更早的追问（`answeredFollowUps`），见 `buildMessages(..., {followUp})`。
@@ -119,12 +122,15 @@
 | GET | `/health` | 兼容性自检：插件版本、Node 版本、`revision`、四个宿主服务是否挂载、缺失列表。客户端启动时拉一次，缺失就在面板顶部显示黄色横幅 |
 | GET | `/models?projectId=` | provider/model 目录（给模型选择器）；带 projectId 时 `current` 反映项目级覆盖 |
 | GET | `/effort?provider=&model=&projectId=` | 该模型的推理档位 `{ efforts:[{id,name,description}], defaultEffort, current }`（给思考程度选择器） |
+| GET | `/export?projectId=` | 导出 `<项目名>.zip`（`project.json` + `attachments/`，附件字节打进包里；`Content-Disposition` 携带 UTF-8 文件名） |
+| GET | `/backups` | 滚动备份列表 `[{file, savedAt, revision, projects, cards}]`，最新在前（给恢复弹层） |
 | POST | `/model` | `{op:'set'|'reset', projectId?}`：带 projectId 写 `project.model`，否则写 `state.model` |
-| POST | `/project` | `{op:'create'|'update'|'delete'}`；`{op:'import', project}` 导入（规范 id/卡片字段，`running` 落成 error） |
+| POST | `/project` | `{op:'create'|'update'|'delete'|'activate'}`；`{op:'import', project}` 导入（规范 id/卡片字段，`running` 落成 error）；`{op:'import-bundle', dataB64}` 解 ZIP 导入（附件字节重新走一遍 admission，不信任外来 ref） |
+| POST | `/backup` | `{op:'restore', file}`：停掉全部生成 → 当前状态先强制备份 → 用该快照整体替换 → 返回 snapshot |
 | POST | `/session` | `{op:'bind'|'unbind'}` 会话 ↔ 树 |
-| POST | `/card` | `{op:'create'|'update'|'delete'}`；另有 `{op:'reparent', cardId, parentId}`（改父节点，成环被拒）、`{op:'layout', positions:{cardId:{x,y}}\|'reset'}`（全览手动坐标）、`{op:'follow', cardId, prompt}`（卡片内追问，返回的 snapshot 里多一条 `card.followUps`）和 `{op:'ref', cardId, targetId, remove?}`（虚线引用，写 `card.refs`，最多 8 条、不能引用自己） |
+| POST | `/card` | `{op:'create'|'update'|'delete'}`（update 可带 `title`，写入 `card.titleManual`）；另有 `{op:'reparent', cardId, parentId}`（改父节点，成环被拒；`parentId:null` = 脱离成树根）、`{op:'layout', positions:{cardId:{x,y}}\|'reset'}`（全览手动坐标）、`{op:'follow', cardId, prompt}`（卡片内追问，返回的 snapshot 里多一条 `card.followUps`）和 `{op:'ref', cardId, targetId, remove?}`（虚线引用，写 `card.refs`，最多 8 条、不能引用自己） |
 | POST | `/send` | 开 SSE 生成一张卡片或一条追问；可带 `attachments` 与 `followUpId`；`start` 帧返回 `runId` 与上下文预算 |
-| POST | `/title` | `{projectId, cardId}`：让模型按问题 + 回答节选给卡片起短标题，写入 `card.title`；没有回答时 400。响应带 `title` |
+| POST | `/title` | `{projectId, cardId}`：让模型按问题 + 回答节选给卡片起短标题，写入 `card.title`；没有回答时 400；`card.titleManual` 的卡片 400（手动命名优先） |
 | POST | `/autoTitle` | `{enabled}`：写 `state.autoTitle`；客户端默认开启，界面上不提供开关（留作脚本/调试用） |
 | POST | `/stop` | `{runId}` 精确停止；兼容旧的 `{projectId, cardId, followUpId?}`；目标落成 `partial`（有文本）或 `idle` |
 
@@ -213,15 +219,16 @@ client 侧还有一层 rAF 合并（`streamPending` + `streamFrame`），一帧�
 2. localStorage 相关：`TREE_OPEN_KEY` / `TREE_WIDTH_*` / `COLLAPSED_KEY` / `MODE_KEY`
 3. `createStore()`：状态 + `useSyncExternalStore` 订阅；含 SSE 解析（rAF 合并）、附件读取（FileReader→base64）、
    项目名/背景防抖保存（450ms）、`importProject`/`restoreProject`、`loadModels`/`setModel`/`loadEfforts`/`setEffort`（带 projectId）、
-   `refreshTitle`（答完后让宿主按回答给卡片起名；自动执行，界面不提供开关）
+   `refreshTitle`（答完后让宿主按回答给卡片起名）、`renameCard`（手动改名）、
+   `exportZip`/`listBackups`/`restoreBackup`、`checkFresh`（focus/visibility 比对 revision，多标签页自动同步）
 4. 模块级 `services.layout` / `goToPanel()` / `goToConversation()` / `remountConversation()`
 5. CSS 模板串（只用 `--dsw-alias-*` token）
 6. 图标 `svg()` + `Glyph*`，`Menu`，`ModelPicker`，`EffortPicker`
-7. 业务组件：`Row` / `TreeRows`（含搜索过滤）/ `Overview`（拖动、↗ 改父级、⇢ 引用虚线、删除/自动排列）/
+7. 业务组件：`Row`（带 `data-card-id`，键盘导航滚动定位用）/ `TreeRows`（含搜索过滤）/ `Overview`（拖动、↗ 改父级且拖到空白 = 提议脱离、⇢ 引用虚线、删除/自动排列）/
    `ToolSteps` / `Reasoning`（回答上方的思考过程折叠条，卡片与追问各一条）/
-   `Detail`（追问线程、引用区、partial 与「继续」、上下文徽标、`重答 ▾`）/
+   `Detail`（追问线程、引用区、partial 与「继续」、上下文徽标、`重答 ▾`、「改名」「脱离父级」）/
    `Composer`（模式胶囊菜单 `↳ 深入 ▾`，方向记在 localStorage）/ `TreeComposer`（会话输入框接管）/
-   `Root`（搜索、导出/导入、删除撤销、
+   `Root`（搜索 + `/` `↑↓` `Del` 键盘导航、导出/导入 ZIP、备份恢复弹层、脱离确认弹层、删除撤销、
    Escape 关闭顺序、错误/通知 toast）
 8. `apply(ctx)`：注册三个座位 + 返回 disposer
 
