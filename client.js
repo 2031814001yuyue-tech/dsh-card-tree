@@ -1800,6 +1800,7 @@ window.__ModuleLoader__.load({
 .ct-md th{background:var(--dsw-alias-bg-layer-1);font-weight:600}
 /* ---------- math ---------- */
 .ct-math{display:block;margin:12px 0;overflow-x:auto;overflow-y:hidden;text-align:center;line-height:2}
+.ct-math-inline-block{display:block;margin:10px 0;overflow-x:auto;overflow-y:hidden;text-align:center;white-space:nowrap;line-height:1.9}
 .ct-math-inline{white-space:nowrap}
 .ct-math-display{white-space:nowrap}
 .ct-mfrac{display:inline-flex;flex-direction:column;vertical-align:middle;text-align:center;margin:0 .22em;font-size:.94em;line-height:1.18}
@@ -2617,11 +2618,15 @@ window.__ModuleLoader__.load({
     };
 
     function looksLikeMath(text) {
-      const body = String(text == null ? '' : text);
-      if (!body.trim() || body.length > 400) return false;
-      // Only treat a $…$ pair as math when it really looks like TeX; money like
-      // "$5" or "$3.50" stays literal text.
-      return /\\[a-zA-Z]|\^|_/.test(body);
+      const body = String(text == null ? '' : text).trim();
+      if (!body || body.length > 400) return false;
+      // TeX command, scripts, or letters sitting next to an operator.
+      if (/\\[a-zA-Z]/.test(body)) return true;
+      if (/[\^_]/.test(body)) return true;
+      if (/[A-Za-z]/.test(body) && /[=<>+\-*/×÷±≈≤≥∈∉⊂⊆↦→⇒]/.test(body)) return true;
+      if (/^[A-Za-z]{1,4}$/.test(body)) return true;
+      // Money like "$5" or "$3.50" must stay literal text.
+      return false;
     }
 
     function mathGroup(source, start, single) {
@@ -2745,14 +2750,17 @@ window.__ModuleLoader__.load({
       return out;
     }
 
-    function mathHtml(tex, display, alreadyEscaped) {
+    function mathHtml(tex, display, alreadyEscaped, inlineBlock) {
       const source = alreadyEscaped
         ? String(tex == null ? '' : tex)
         : escapeHtml(String(tex == null ? '' : tex));
       const html = renderMath(source);
-      return display
-        ? '<span class="ct-math-display">' + html + '</span>'
-        : '<span class="ct-math-inline">' + html + '</span>';
+      if (display) {
+        return inlineBlock
+          ? '<span class="ct-math-inline-block">' + html + '</span>'
+          : '<span class="ct-math-display">' + html + '</span>';
+      }
+      return '<span class="ct-math-inline">' + html + '</span>';
     }
     /* @verify:math-end */
 
@@ -2763,6 +2771,21 @@ window.__ModuleLoader__.load({
         return '\u0000' + (codes.length - 1) + '\u0000';
       });
       const maths = [];
+      out = out.replace(/\$\$([\s\S]*?)\$\$/g, (match, body) => {
+        if (!String(body).trim()) return match;
+        maths.push(mathHtml(body, true, true, true));
+        return '\u0001' + (maths.length - 1) + '\u0001';
+      });
+      out = out.replace(/\\\[([\s\S]*?)\\\]/g, (match, body) => {
+        if (!String(body).trim()) return match;
+        maths.push(mathHtml(body, true, true, true));
+        return '\u0001' + (maths.length - 1) + '\u0001';
+      });
+      out = out.replace(/\\\(([\s\S]*?)\\\)/g, (match, body) => {
+        if (!String(body).trim()) return match;
+        maths.push(mathHtml(body, false, true));
+        return '\u0001' + (maths.length - 1) + '\u0001';
+      });
       out = out.replace(/\$([^$\n]+?)\$/g, (match, body) => {
         if (!looksLikeMath(body)) return match;
         maths.push(mathHtml(body, false, true));

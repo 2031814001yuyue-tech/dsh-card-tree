@@ -216,7 +216,13 @@ check('math rendering', () => {
   assert(sub.indexOf('<sub>θ</sub>') >= 0, 'subscript, got: ' + sub);
 
   assert(math.looksLikeMath('\\theta') === true, 'tex should be detected');
+  assert(math.looksLikeMath('k=2') === true, 'letter+operator should count as math');
   assert(math.looksLikeMath('5') === false, 'plain money should stay text');
+  assert(math.looksLikeMath('3.50') === false, 'a decimal price should stay text');
+
+  const block = math.mathHtml('SST = SSB + SSW', true, false, true);
+  assert(block.indexOf('ct-math-inline-block') >= 0, 'display math keeps a block wrapper, got: ' + block);
+  assert(block.indexOf('SST = SSB + SSW') >= 0, 'display math body survives');
 
   const evil = math.mathHtml('<img src=x onerror=alert(1)>', false, false);
   assert(evil.indexOf('<img') < 0, 'math output must stay escaped');
