@@ -221,6 +221,7 @@ client 侧还有一层 rAF 合并（`streamPending` + `streamFrame`），一帧�
    项目名/背景防抖保存（450ms）、`importProject`/`restoreProject`、`loadModels`/`setModel`/`loadEfforts`/`setEffort`（带 projectId）、
    `refreshTitle`（答完后让宿主按回答给卡片起名）、`renameCard`（手动改名）、
    `exportZip`/`listBackups`/`restoreBackup`、`checkFresh`（focus/visibility 比对 revision，多标签页自动同步）
+   <!-- 数学渲染在 markdown 段：`$…$` / `$$…$$` → `mathHtml()` 轻量 TeX 子集（分数、上下标、希腊字母、\mathcal/\mathbb 映射、HTML 转义） -->
 4. 模块级 `services.layout` / `goToPanel()` / `goToConversation()` / `remountConversation()`
 5. CSS 模板串（只用 `--dsw-alias-*` token）
 6. 图标 `svg()` + `Glyph*`，`Menu`，`ModelPicker`，`EffortPicker`

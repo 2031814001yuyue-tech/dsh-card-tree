@@ -186,6 +186,43 @@ check('single-file bundle', () => {
   return requires.length === 1 ? 'requires react only' : 'no relative requires';
 });
 
+check('math rendering', () => {
+  const escBegin = client.indexOf('/* @verify:escape-begin */');
+  const escFinish = client.indexOf('/* @verify:escape-end */');
+  assert(escBegin >= 0 && escFinish > escBegin, 'escapeHtml markers not found in client.js');
+  const escapeSrc = client.slice(escBegin, escFinish);
+  const mathStart = client.indexOf('/* @verify:math-begin */');
+  const mathEnd = client.indexOf('/* @verify:math-end */');
+  assert(mathStart >= 0 && mathEnd > mathStart, 'math section markers not found in client.js');
+  const mathSrc = client.slice(mathStart, mathEnd);
+  const factory = new Function(escapeSrc + '\n' + mathSrc + '\nreturn { mathHtml, looksLikeMath };');
+  const math = factory();
+
+  const frac = math.mathHtml('\\frac{a}{b}', true, false);
+  assert(frac.indexOf('ct-mfrac') >= 0, 'fraction markup, got: ' + frac);
+  assert(frac.indexOf('ct-mnum') >= 0 && frac.indexOf('ct-mden') >= 0, 'fraction numerator/denominator');
+
+  const cal = math.mathHtml('\\mathcal{X}', false, false);
+  assert(cal.indexOf('𝒳') >= 0, 'mathcal should map to a script letter, got: ' + cal);
+
+  const bb = math.mathHtml('\\mathbb{R}^k', false, false);
+  assert(bb.indexOf('ℝ') >= 0, 'mathbb R, got: ' + bb);
+  assert(bb.indexOf('<sup>k</sup>') >= 0, 'superscript, got: ' + bb);
+
+  const greek = math.mathHtml('\\theta \\in \\Theta', false, false);
+  assert(greek.indexOf('θ') >= 0 && greek.indexOf('∈') >= 0 && greek.indexOf('Θ') >= 0, 'greek and relations: ' + greek);
+
+  const sub = math.mathHtml('P_\\theta', false, false);
+  assert(sub.indexOf('<sub>θ</sub>') >= 0, 'subscript, got: ' + sub);
+
+  assert(math.looksLikeMath('\\theta') === true, 'tex should be detected');
+  assert(math.looksLikeMath('5') === false, 'plain money should stay text');
+
+  const evil = math.mathHtml('<img src=x onerror=alert(1)>', false, false);
+  assert(evil.indexOf('<img') < 0, 'math output must stay escaped');
+  return 'fractions, greek, script/blackboard, scripts, escaping';
+});
+
 /* ----------------------------------------------------------- host logic */
 
 console.log('\nhost logic');

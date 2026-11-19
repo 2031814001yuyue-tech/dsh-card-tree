@@ -1798,6 +1798,20 @@ window.__ModuleLoader__.load({
 .ct-md table{margin:12px 0;border-collapse:collapse;font-size:12.5px;display:block;overflow:auto;max-width:100%}
 .ct-md th,.ct-md td{border:1px solid var(--dsw-alias-border-l1);padding:6px 10px;text-align:left;vertical-align:top}
 .ct-md th{background:var(--dsw-alias-bg-layer-1);font-weight:600}
+/* ---------- math ---------- */
+.ct-math{display:block;margin:12px 0;overflow-x:auto;overflow-y:hidden;text-align:center;line-height:2}
+.ct-math-inline{white-space:nowrap}
+.ct-math-display{white-space:nowrap}
+.ct-mfrac{display:inline-flex;flex-direction:column;vertical-align:middle;text-align:center;margin:0 .22em;font-size:.94em;line-height:1.18}
+.ct-mnum{padding:0 .24em;border-bottom:1px solid currentColor}
+.ct-mden{padding:0 .24em}
+.ct-mcal{font-family:var(--ct-display,serif);font-style:italic}
+.ct-mbb{font-weight:600}
+.ct-mop{font-style:normal}
+.ct-mbf{font-weight:700}
+.ct-mit{font-style:italic}
+.ct-math sup{font-size:.72em;line-height:0;vertical-align:super}
+.ct-math sub{font-size:.72em;line-height:0;vertical-align:sub}
 /* ---------- overview ---------- */
 .ct-overview{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
 .ct-overview-hint{padding:8px 16px;font-size:11.5px;color:var(--dsw-alias-label-secondary);border-bottom:1px solid var(--dsw-alias-border-l1);display:flex;align-items:center;gap:10px}
@@ -2549,6 +2563,7 @@ window.__ModuleLoader__.load({
 
     /* ----------------------------------------------------------- markdown */
 
+    /* @verify:escape-begin */
     function escapeHtml(text) {
       return String(text == null ? '' : text)
         .replace(/&/g, '&amp;')
@@ -2556,6 +2571,190 @@ window.__ModuleLoader__.load({
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
     }
+    /* @verify:escape-end */
+
+    /* @verify:math-begin */
+    const MATH_SYMBOLS = {
+      alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε',
+      zeta: 'ζ', eta: 'η', theta: 'θ', vartheta: 'ϑ', iota: 'ι', kappa: 'κ',
+      lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π', varpi: 'ϖ', rho: 'ρ',
+      varrho: 'ϱ', sigma: 'σ', varsigma: 'ς', tau: 'τ', upsilon: 'υ', phi: 'φ',
+      varphi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
+      Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π',
+      Sigma: 'Σ', Upsilon: 'Υ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+      times: '×', cdot: '·', div: '÷', pm: '±', mp: '∓', ast: '∗', star: '⋆',
+      le: '≤', leq: '≤', ge: '≥', geq: '≥', neq: '≠', ne: '≠', approx: '≈',
+      equiv: '≡', sim: '∼', simeq: '≃', cong: '≅', propto: '∝', ll: '≪', gg: '≫',
+      subset: '⊂', supset: '⊃', subseteq: '⊆', supseteq: '⊇', subsetneq: '⊊',
+      in: '∈', notin: '∉', ni: '∋', cup: '∪', cap: '∩', emptyset: '∅',
+      varnothing: '∅', setminus: '∖', complement: '∁',
+      forall: '∀', exists: '∃', nexists: '∄', neg: '¬', lnot: '¬',
+      land: '∧', wedge: '∧', lor: '∨', vee: '∨', oplus: '⊕', otimes: '⊗',
+      to: '→', rightarrow: '→', leftarrow: '←', gets: '←', Rightarrow: '⇒',
+      Leftarrow: '⇐', leftrightarrow: '↔', Leftrightarrow: '⇔', mapsto: '↦',
+      implies: '⇒', iff: '⇔', uparrow: '↑', downarrow: '↓', updownarrow: '↕',
+      infty: '∞', partial: '∂', nabla: '∇', sum: '∑', prod: '∏', coprod: '∐',
+      int: '∫', iint: '∬', iiint: '∭', oint: '∮', sqrt: '√',
+      ldots: '…', dots: '…', cdots: '⋯', vdots: '⋮', ddots: '⋱',
+      prime: '′', circ: '∘', bullet: '•', oplus_: '⊕',
+      perp: '⊥', parallel: '∥', angle: '∠', triangle: '△', square: '□',
+      mid: '∣', nmid: '∤', vert: '|', Vert: '‖', lvert: '|', rvert: '|',
+      lVert: '‖', rVert: '‖', colon: ':', '|': '‖',
+      aleph: 'ℵ', hbar: 'ℏ', ell: 'ℓ', Re: 'ℜ', Im: 'ℑ', wp: '℘',
+      quad: ' ', qquad: '  ', enspace: ' ', thinspace: ' ',
+    };
+    const MATH_SCRIPT = {
+      A: '𝒜', B: 'ℬ', C: '𝒞', D: '𝒟', E: 'ℰ', F: 'ℱ', G: '𝒢', H: 'ℋ',
+      I: 'ℐ', J: '𝒥', K: '𝒦', L: 'ℒ', M: 'ℳ', N: '𝒩', O: '𝒪', P: '𝒫',
+      Q: '𝒬', R: 'ℛ', S: '𝒮', T: '𝒯', U: '𝒰', V: '𝒱', W: '𝒲', X: '𝒳',
+      Y: '𝒴', Z: '𝒵',
+    };
+    const MATH_BB = {
+      A: '𝔸', B: '𝔹', C: 'ℂ', D: '𝔻', E: '𝔼', F: '𝔽', G: '𝔾', H: 'ℍ',
+      I: '𝕀', J: '𝕁', K: '𝕂', L: '𝕃', M: '𝕄', N: 'ℕ', O: '𝕆', P: 'ℙ',
+      Q: 'ℚ', R: 'ℝ', S: '𝕊', T: '𝕋', U: '𝕌', V: '𝕍', W: '𝕎', X: '𝕏',
+      Y: '𝕐', Z: 'ℤ',
+    };
+
+    function looksLikeMath(text) {
+      const body = String(text == null ? '' : text);
+      if (!body.trim() || body.length > 400) return false;
+      // Only treat a $…$ pair as math when it really looks like TeX; money like
+      // "$5" or "$3.50" stays literal text.
+      return /\\[a-zA-Z]|\^|_/.test(body);
+    }
+
+    function mathGroup(source, start, single) {
+      if (start >= source.length) return null;
+      if (single && source[start] !== '{') {
+        if (source[start] === '\\') {
+          const word = /^\\([a-zA-Z]+)/.exec(source.slice(start));
+          if (word) return { text: word[0], next: start + word[0].length };
+        }
+        return { text: source[start], next: start + 1 };
+      }
+      if (source[start] !== '{') return null;
+      let depth = 0;
+      for (let i = start; i < source.length; i += 1) {
+        const ch = source[i];
+        if (ch === '\\') { i += 1; continue; }
+        if (ch === '{') depth += 1;
+        else if (ch === '}') {
+          depth -= 1;
+          if (depth === 0) return { text: source.slice(start + 1, i), next: i + 1 };
+        }
+      }
+      return { text: source.slice(start + 1), next: source.length };
+    }
+
+    function mathDelimiter(ch) {
+      if (!ch) return '';
+      if (ch === '.') return '';
+      if (ch === '<') return '⟨';
+      if (ch === '>') return '⟩';
+      return ch;
+    }
+
+    function renderMath(source) {
+      let out = '';
+      let index = 0;
+      while (index < source.length) {
+        const ch = source[index];
+        if (ch === '\\') {
+          const word = /^\\([a-zA-Z]+)/.exec(source.slice(index));
+          if (word) {
+            const name = word[1];
+            index += word[0].length;
+            if (name === 'frac' || name === 'dfrac' || name === 'tfrac') {
+              const top = mathGroup(source, index);
+              if (!top) { out += name; continue; }
+              index = top.next;
+              const bottom = mathGroup(source, index);
+              if (!bottom) { out += renderMath(top.text); continue; }
+              index = bottom.next;
+              out += '<span class="ct-mfrac"><span class="ct-mnum">' + renderMath(top.text) +
+                '</span><span class="ct-mden">' + renderMath(bottom.text) + '</span></span>';
+              continue;
+            }
+            if (name === 'sqrt') {
+              let degree = null;
+              if (source[index] === '[') {
+                const close = source.indexOf(']', index);
+                if (close > index) { degree = source.slice(index + 1, close); index = close + 1; }
+              }
+              const body = mathGroup(source, index);
+              if (!body) { out += '√'; continue; }
+              index = body.next;
+              out += (degree ? '<sup>' + renderMath(degree) + '</sup>' : '') +
+                '√(' + renderMath(body.text) + ')';
+              continue;
+            }
+            if (name === 'text' || name === 'mathrm' || name === 'mathbf' || name === 'mathit' ||
+              name === 'mathsf' || name === 'mathtt' || name === 'operatorname' || name === 'mathcalDummy') {
+              const group = mathGroup(source, index);
+              if (!group) continue;
+              index = group.next;
+              const cls = name === 'mathbf' ? 'ct-mbf' : name === 'mathit' ? 'ct-mit' : 'ct-mop';
+              out += '<span class="' + cls + '">' + renderMath(group.text) + '</span>';
+              continue;
+            }
+            if (name === 'mathcal' || name === 'mathbb') {
+              const group = mathGroup(source, index);
+              if (!group) continue;
+              index = group.next;
+              const table = name === 'mathcal' ? MATH_SCRIPT : MATH_BB;
+              const mapped = group.text.split('').map((letter) => table[letter] || letter).join('');
+              out += '<span class="' + (name === 'mathbb' ? 'ct-mbb' : 'ct-mcal') + '">' + mapped + '</span>';
+              continue;
+            }
+            if (name === 'left' || name === 'right') {
+              out += mathDelimiter(source[index]);
+              if (source[index]) index += 1;
+              continue;
+            }
+            if (name === 'begin' || name === 'end') {
+              const group = mathGroup(source, index);
+              if (group) index = group.next;
+              continue;
+            }
+            out += MATH_SYMBOLS[name] != null ? MATH_SYMBOLS[name] : name;
+            continue;
+          }
+          const next = source[index + 1];
+          index += 2;
+          if (next === '\\') out += '<br>';
+          else if (next === ', ' || next === ';' || next === ':' || next === ' ') out += ' ';
+          else if (next === '!') out += '';
+          else out += next == null ? '' : next;
+          continue;
+        }
+        if (ch === '^' || ch === '_') {
+          index += 1;
+          let body = '';
+          const group = mathGroup(source, index, true);
+          if (group) { body = group.text; index = group.next; }
+          const tag = ch === '^' ? 'sup' : 'sub';
+          out += '<' + tag + '>' + renderMath(body) + '</' + tag + '>';
+          continue;
+        }
+        if (ch === '{' || ch === '}') { index += 1; continue; }
+        if (ch === '~') { out += ' '; index += 1; continue; }
+        out += ch;
+        index += 1;
+      }
+      return out;
+    }
+
+    function mathHtml(tex, display, alreadyEscaped) {
+      const source = alreadyEscaped
+        ? String(tex == null ? '' : tex)
+        : escapeHtml(String(tex == null ? '' : tex));
+      const html = renderMath(source);
+      return display
+        ? '<span class="ct-math-display">' + html + '</span>'
+        : '<span class="ct-math-inline">' + html + '</span>';
+    }
+    /* @verify:math-end */
 
     function inlineHtml(text) {
       const codes = [];
@@ -2563,12 +2762,19 @@ window.__ModuleLoader__.load({
         codes.push('<code>' + code + '</code>');
         return '\u0000' + (codes.length - 1) + '\u0000';
       });
+      const maths = [];
+      out = out.replace(/\$([^$\n]+?)\$/g, (match, body) => {
+        if (!looksLikeMath(body)) return match;
+        maths.push(mathHtml(body, false, true));
+        return '\u0001' + (maths.length - 1) + '\u0001';
+      });
       out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
       out = out.replace(/__([^_]+)__/g, '<strong>$1</strong>');
       out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
       out = out.replace(/(^|[\s（(])_([^_\n]+)_(?=$|[\s，。、）)])/g, '$1<em>$2</em>');
       out = out.replace(/~~([^~]+)~~/g, '<del>$1</del>');
       out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer noopener">$1</a>');
+      out = out.replace(/\u0001(\d+)\u0001/g, (match, index) => maths[Number(index)] || '');
       out = out.replace(/\u0000(\d+)\u0000/g, (match, index) => codes[Number(index)] || '');
       return out;
     }
@@ -2621,6 +2827,35 @@ window.__ModuleLoader__.load({
         if (!line.trim()) {
           flushAll();
           index += 1;
+          continue;
+        }
+
+        /* $$ … $$ or \[ … \] display math (may span lines) */
+        if (/^\s*\$\$/.test(line) || /^\s*\\\[/.test(line)) {
+          const opener = /^\s*\$\$/.test(line) ? '$$' : '\\[';
+          const closer = opener === '$$' ? '$$' : '\\]';
+          flushAll();
+          let rest = line.replace(/^\s*/, '').slice(opener.length);
+          index += 1;
+          let tex;
+          const at = rest.indexOf(closer);
+          if (at >= 0) {
+            tex = rest.slice(0, at);
+          } else {
+            const buffer = [rest];
+            while (index < lines.length) {
+              const current = lines[index];
+              index += 1;
+              const stop = current.indexOf(closer);
+              if (stop >= 0) {
+                buffer.push(current.slice(0, stop));
+                break;
+              }
+              buffer.push(current);
+            }
+            tex = buffer.join('\n');
+          }
+          blocks.push('<div class="ct-math">' + mathHtml(tex, true, false) + '</div>');
           continue;
         }
 
@@ -2722,6 +2957,8 @@ window.__ModuleLoader__.load({
     function plainText(src) {
       return String(src == null ? '' : src)
         .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/\$\$([\s\S]*?)\$\$/g, ' $1 ')
+        .replace(/\$([^$\n]+?)\$/g, '$1')
         .replace(/`([^`]+)`/g, '$1')
         .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
         .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
