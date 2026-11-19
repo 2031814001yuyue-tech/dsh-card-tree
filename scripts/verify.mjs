@@ -217,6 +217,10 @@ check('math rendering', () => {
 
   assert(math.looksLikeMath('\\theta') === true, 'tex should be detected');
   assert(math.looksLikeMath('k=2') === true, 'letter+operator should count as math');
+  assert(math.looksLikeMath('t(k)') === true, 'distribution notation t(k) should count as math');
+  assert(math.looksLikeMath('F(m,n)') === true, 'F(m,n) should count as math');
+  assert(math.looksLikeMath('N(0,1)') === true, 'N(0,1) should count as math');
+  assert(math.looksLikeMath('(see note)') === false, 'a spaced phrase should stay text');
   assert(math.looksLikeMath('5') === false, 'plain money should stay text');
   assert(math.looksLikeMath('3.50') === false, 'a decimal price should stay text');
 

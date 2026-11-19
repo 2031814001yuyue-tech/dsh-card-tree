@@ -2625,6 +2625,10 @@ window.__ModuleLoader__.load({
       if (/[\^_]/.test(body)) return true;
       if (/[A-Za-z]/.test(body) && /[=<>+\-*/×÷±≈≤≥∈∉⊂⊆↦→⇒]/.test(body)) return true;
       if (/^[A-Za-z]{1,4}$/.test(body)) return true;
+      // Distribution / function notation such as t(k), F(m,n), N(0,1).
+      if (/^[A-Za-z][A-Za-z0-9]*\s*\([^()]*\)$/.test(body)) return true;
+      // Compact symbolic expressions without spaces: P(A|B), A,B, a*b.
+      if (/[A-Za-z]/.test(body) && !/\s/.test(body) && /[()[\],|]/.test(body)) return true;
       // Money like "$5" or "$3.50" must stay literal text.
       return false;
     }
