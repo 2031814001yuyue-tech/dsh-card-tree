@@ -84,6 +84,7 @@ window.__ModuleLoader__.load({
         collapseBranch: '收起这条分支',
         expandBranch: '展开这条分支',
         resizeTree: '拖动调整列表宽度',
+        resizeRead: '拖动调整阅读宽度（双击复位）',
         switchProject: '切换项目',
         more: '更多',
         continueAsk: '接着问',
@@ -241,6 +242,7 @@ window.__ModuleLoader__.load({
         collapseBranch: 'Collapse this branch',
         expandBranch: 'Expand this branch',
         resizeTree: 'Drag to resize the list',
+        resizeRead: 'Drag to resize the reading column (double-click to reset)',
         switchProject: 'Switch project',
         more: 'More',
         continueAsk: 'Ask next',
@@ -425,6 +427,34 @@ window.__ModuleLoader__.load({
       }
     }
 
+    const READ_WIDTH_KEY = 'dsh-card-tree.read-width';
+    const READ_WIDTH_DEFAULT = 860;
+    const READ_WIDTH_MIN = 520;
+    const READ_WIDTH_MAX = 1600;
+
+    function clampReadWidth(value) {
+      const width = Math.round(Number(value));
+      if (!isFinite(width)) return READ_WIDTH_DEFAULT;
+      return Math.max(READ_WIDTH_MIN, Math.min(READ_WIDTH_MAX, width));
+    }
+
+    function readReadWidth() {
+      try {
+        const raw = window.localStorage.getItem(READ_WIDTH_KEY);
+        return raw === null ? READ_WIDTH_DEFAULT : clampReadWidth(raw);
+      } catch (error) {
+        return READ_WIDTH_DEFAULT;
+      }
+    }
+
+    function writeReadWidth(width) {
+      try {
+        window.localStorage.setItem(READ_WIDTH_KEY, String(clampReadWidth(width)));
+      } catch (error) {
+        /* localStorage is optional */
+      }
+    }
+
     const HELP_SEEN_KEY = 'dsh-card-tree.help-seen';
 
     function readHelpSeen() {
@@ -514,6 +544,8 @@ window.__ModuleLoader__.load({
         overview: false,
         treeOpen: readTreeOpen(),
         treeWidth: readTreeWidth(),
+        readWidth: readReadWidth(),
+        mainWidth: 0,
         collapsed: readCollapsed(),
         models: { loading: false, providers: null, current: null },
         efforts: { loading: false, list: [], defaultEffort: null },
@@ -521,6 +553,7 @@ window.__ModuleLoader__.load({
         contexts: {},
         search: '',
         revision: 0,
+        mathReady: false,
         health: { status: 'idle', version: '', services: null, missing: [] },
         seatIssues: [],
       };
@@ -1351,6 +1384,24 @@ window.__ModuleLoader__.load({
         writeTreeWidth(state.treeWidth);
       }
 
+      function setReadWidth(width) {
+        patch({ readWidth: clampReadWidth(width) });
+      }
+
+      function commitReadWidth() {
+        writeReadWidth(state.readWidth);
+      }
+
+      function resetReadWidth() {
+        patch({ readWidth: READ_WIDTH_DEFAULT });
+        writeReadWidth(READ_WIDTH_DEFAULT);
+      }
+
+      function setMainWidth(width) {
+        const mainWidth = Math.max(0, Math.round(Number(width) || 0));
+        if (mainWidth !== state.mainWidth) patch({ mainWidth });
+      }
+
       function toggleTree() {
         const treeOpen = !state.treeOpen;
         writeTreeOpen(treeOpen);
@@ -1473,6 +1524,10 @@ window.__ModuleLoader__.load({
         toggleCollapse,
         setTreeWidth,
         commitTreeWidth,
+        setReadWidth,
+        commitReadWidth,
+        resetReadWidth,
+        setMainWidth,
         addFiles,
         removeAttachment,
         clearAttachments,
@@ -1617,9 +1672,12 @@ window.__ModuleLoader__.load({
 .ct-resizer{flex:0 0 7px;margin:0 -4px 0 -3px;cursor:col-resize;position:relative;z-index:6}
 .ct-resizer::after{content:'';position:absolute;left:2px;top:0;bottom:0;width:2px;background:transparent;border-radius:2px;transition:background .12s}
 .ct-resizer:hover::after,.ct-resizer:active::after{background:var(--dsw-alias-brand-primary);opacity:.55}
-.ct-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;min-height:0}
+.ct-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;min-height:0;position:relative}
 .ct-read{flex:1 1 auto;min-height:0;overflow:auto}
-.ct-read-inner{max-width:780px;margin:0 auto;padding:22px 28px 8px;box-sizing:border-box}
+.ct-read-inner{max-width:var(--ct-read-width,780px);margin:0 auto;padding:22px 28px 8px;box-sizing:border-box}
+.ct-read-handle{position:absolute;top:0;bottom:0;width:11px;margin-left:-5px;cursor:col-resize;z-index:5;border-radius:4px;transition:background .12s}
+.ct-read-handle::after{content:'';position:absolute;left:4px;top:50%;transform:translateY(-50%);width:3px;height:34px;border-radius:3px;background:transparent;transition:background .12s}
+.ct-read-handle:hover::after,.ct-read-handle:active::after{background:var(--dsw-alias-brand-primary);opacity:.6}
 /* ---------- tree ---------- */
 .ct-row{display:flex;align-items:center;gap:7px;padding:6px 8px;border-radius:8px;cursor:pointer;position:relative;min-height:30px;box-sizing:border-box}
 .ct-row:hover{background:var(--dsw-alias-bg-layer-1)}
@@ -1800,6 +1858,12 @@ window.__ModuleLoader__.load({
 .ct-md th{background:var(--dsw-alias-bg-layer-1);font-weight:600}
 /* ---------- math ---------- */
 .ct-math{display:block;margin:12px 0;overflow-x:auto;overflow-y:hidden;text-align:center;line-height:2}
+/* KaTeX output: keep it on the text baseline grid instead of its own rhythm. */
+.ct-md .katex{font-size:1.06em}
+.ct-md .katex-display{margin:0}
+.ct-md .ct-math .katex-display{margin:0}
+.ct-md .ct-math{line-height:1.6;padding:2px 0}
+.ct-md .ct-math-inline-block{line-height:1.6}
 .ct-math-inline-block{display:block;margin:10px 0;overflow-x:auto;overflow-y:hidden;text-align:center;white-space:nowrap;line-height:1.9}
 .ct-math-inline{white-space:nowrap}
 .ct-math-display{white-space:nowrap}
@@ -1993,7 +2057,7 @@ window.__ModuleLoader__.load({
 .ct-row-tag{border-radius:5px;background:var(--dsw-alias-bg-base);box-shadow:none}
 .ct-row-del{width:22px;height:22px}
 .ct-read{background:color-mix(in srgb,var(--dsw-alias-bg-base) 97%,var(--dsw-alias-bg-layer-1));scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l2) transparent}
-.ct-read-inner{max-width:860px;padding:38px 44px 28px}
+.ct-read-inner{max-width:var(--ct-read-width,860px);padding:38px 44px 28px}
 .ct-detail{animation:ct-detail-in .28s var(--ct-ease)}
 @keyframes ct-detail-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
 .ct-meta{gap:10px;font-size:11px;letter-spacing:.015em}
@@ -2754,10 +2818,42 @@ window.__ModuleLoader__.load({
       return out;
     }
 
+    /* Set once the vendored KaTeX bundle has loaded; null falls back to the renderer below. */
+    let katexLib = null;
+
+    function unescapeMath(text) {
+      return String(text)
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, '&');
+    }
+
     function mathHtml(tex, display, alreadyEscaped, inlineBlock) {
       const source = alreadyEscaped
         ? String(tex == null ? '' : tex)
         : escapeHtml(String(tex == null ? '' : tex));
+      if (katexLib) {
+        const raw = alreadyEscaped ? unescapeMath(source) : String(tex == null ? '' : tex);
+        try {
+          const html = katexLib.renderToString(raw, {
+            displayMode: Boolean(display),
+            throwOnError: false,
+            strict: 'ignore',
+            trust: false,
+            output: 'html',
+          });
+          if (display) {
+            return inlineBlock
+              ? '<span class="ct-math-inline-block">' + html + '</span>'
+              : '<span class="ct-math-display">' + html + '</span>';
+          }
+          return html;
+        } catch (error) {
+          /* Fall back to the built-in renderer below. */
+        }
+      }
       const html = renderMath(source);
       if (display) {
         return inlineBlock
@@ -2767,6 +2863,40 @@ window.__ModuleLoader__.load({
       return '<span class="ct-math-inline">' + html + '</span>';
     }
     /* @verify:math-end */
+
+    /* KaTeX lives in the bundle's vendor/ directory and is served over /assets/*. */
+    let katexLoading = null;
+
+    function ensureKatex() {
+      if (katexLib) return Promise.resolve(katexLib);
+      if (katexLoading) return katexLoading;
+      katexLoading = new Promise((resolve) => {
+        if (typeof document === 'undefined') {
+          resolve(null);
+          return;
+        }
+        if (window.katex && typeof window.katex.renderToString === 'function') {
+          katexLib = window.katex;
+          resolve(katexLib);
+          return;
+        }
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = API + '/assets/katex.min.css';
+        document.head.appendChild(link);
+        const script = document.createElement('script');
+        script.src = API + '/assets/katex.min.js';
+        script.async = true;
+        script.onload = () => {
+          katexLib =
+            window.katex && typeof window.katex.renderToString === 'function' ? window.katex : null;
+          resolve(katexLib);
+        };
+        script.onerror = () => resolve(null);
+        document.head.appendChild(script);
+      });
+      return katexLoading;
+    }
 
     function inlineHtml(text) {
       const codes = [];
@@ -3988,6 +4118,7 @@ window.__ModuleLoader__.load({
       }
 
       const rootRef = React.useRef(null);
+      const mainRef = React.useRef(null);
       const searchRef = React.useRef(null);
       const [doomed, setDoomed] = React.useState(null);
       const [deletedProject, setDeletedProject] = React.useState(null);
@@ -4042,6 +4173,29 @@ window.__ModuleLoader__.load({
         });
         observer.observe(node);
         return () => observer.disconnect();
+      }, []);
+
+      /* Track the reading column so the width handle can sit on its right edge. */
+      React.useEffect(() => {
+        const node = mainRef.current;
+        if (!node || typeof ResizeObserver === 'undefined') return undefined;
+        const observer = new ResizeObserver((entries) => {
+          const width = entries[0] && entries[0].contentRect ? entries[0].contentRect.width : 0;
+          store.setMainWidth(width);
+        });
+        observer.observe(node);
+        return () => observer.disconnect();
+      }, []);
+
+      /* Typeset with KaTeX once its bundle arrives, then repaint the answers. */
+      React.useEffect(() => {
+        let alive = true;
+        ensureKatex().then((lib) => {
+          if (alive && lib && !store.get().mathReady) store.patch({ mathReady: true });
+        });
+        return () => {
+          alive = false;
+        };
       }, []);
 
       /* Escape closes whatever is on top, then clears the toast. */
@@ -4290,6 +4444,33 @@ window.__ModuleLoader__.load({
           document.body.style.cursor = previousCursor;
           document.body.style.userSelect = previousSelect;
           store.commitTreeWidth();
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', stop);
+      }
+
+      /* The reading column grows by two pixels per pixel dragged, because it is centered. */
+      function startReadResize(event) {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        const startX = event.clientX;
+        const startWidth = store.get().readWidth;
+        const room = store.get().mainWidth || 0;
+        const limit = room > 120 ? Math.min(READ_WIDTH_MAX, room - 60) : READ_WIDTH_MAX;
+        const previousCursor = document.body.style.cursor;
+        const previousSelect = document.body.style.userSelect;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        const move = (ev) => {
+          const width = Math.round(startWidth + (ev.clientX - startX) * 2);
+          store.setReadWidth(Math.min(limit, width));
+        };
+        const stop = () => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', stop);
+          document.body.style.cursor = previousCursor;
+          document.body.style.userSelect = previousSelect;
+          store.commitReadWidth();
         };
         window.addEventListener('pointermove', move);
         window.addEventListener('pointerup', stop);
@@ -4942,7 +5123,31 @@ window.__ModuleLoader__.load({
                   }),
                   h(
                     'main',
-                    { className: 'ct-main' },
+                    {
+                      className: 'ct-main',
+                      ref: mainRef,
+                      style: { '--ct-read-width': state.readWidth + 'px' },
+                    },
+                    state.compact
+                      ? null
+                      : h('div', {
+                          className: 'ct-read-handle',
+                          role: 'separator',
+                          'aria-orientation': 'vertical',
+                          title: strings.resizeRead,
+                          style: {
+                            left:
+                              Math.max(
+                                0,
+                                Math.min(
+                                  Math.max(0, state.mainWidth - 11),
+                                  Math.round((state.mainWidth + Math.min(state.readWidth, state.mainWidth || state.readWidth)) / 2) - 5,
+                                ),
+                              ) + 'px',
+                          },
+                          onPointerDown: startReadResize,
+                          onDoubleClick: () => store.resetReadWidth(),
+                        }),
                     h(
                       'div',
                       { className: 'ct-read' },

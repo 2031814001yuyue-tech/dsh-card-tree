@@ -19,7 +19,8 @@
              │   ├─ 状态：~/.dsh/card-tree/state.json（原子写）                │
              │   ├─ 模型：ctx.get('llm').stream(...) / agentDefaultModel       │
              │   ├─ 工具：ctx.get('tools').execute(...)（只读白名单，≤6 轮）    │
-             │   └─ 附件：ctx.get('attachments').saveImage / admitEncodedFile │
+             │   ├─ 附件：ctx.get('attachments').saveImage / admitEncodedFile │
+             │   └─ 静态资源：GET /assets/* → vendor/katex/（离线公式排版）     │
              └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -124,6 +125,7 @@
 | GET | `/effort?provider=&model=&projectId=` | 该模型的推理档位 `{ efforts:[{id,name,description}], defaultEffort, current }`（给思考程度选择器） |
 | GET | `/export?projectId=` | 导出 `<项目名>.zip`（`project.json` + `attachments/`，附件字节打进包里；`Content-Disposition` 携带 UTF-8 文件名） |
 | GET | `/backups` | 滚动备份列表 `[{file, savedAt, revision, projects, cards}]`，最新在前（给恢复弹层） |
+| GET | `/assets/*` | 只读静态资源：`vendor/katex/` 下的 `katex.min.js`、`katex.min.css`、`fonts/*.woff2`（供客户端离线排版公式；只接受相对路径，`..` 一律 400） |
 | POST | `/model` | `{op:'set'|'reset', projectId?}`：带 projectId 写 `project.model`，否则写 `state.model` |
 | POST | `/project` | `{op:'create'|'update'|'delete'|'activate'}`；`{op:'import', project}` 导入（规范 id/卡片字段，`running` 落成 error）；`{op:'import-bundle', dataB64}` 解 ZIP 导入（附件字节重新走一遍 admission，不信任外来 ref） |
 | POST | `/backup` | `{op:'restore', file}`：停掉全部生成 → 当前状态先强制备份 → 用该快照整体替换 → 返回 snapshot |
@@ -216,12 +218,14 @@ client 侧还有一层 rAF 合并（`streamPending` + `streamFrame`），一帧�
 单文件，按以下顺序排列（改之前先看这一段，别拆文件）：
 
 1. `COPY`（zh/en 两份键集合，必须一一对应，`scripts/verify.mjs` 会查）
-2. localStorage 相关：`TREE_OPEN_KEY` / `TREE_WIDTH_*` / `COLLAPSED_KEY` / `MODE_KEY`
+2. localStorage 相关：`TREE_OPEN_KEY` / `TREE_WIDTH_*` / `READ_WIDTH_*` / `COLLAPSED_KEY` / `MODE_KEY`
 3. `createStore()`：状态 + `useSyncExternalStore` 订阅；含 SSE 解析（rAF 合并）、附件读取（FileReader→base64）、
    项目名/背景防抖保存（450ms）、`importProject`/`restoreProject`、`loadModels`/`setModel`/`loadEfforts`/`setEffort`（带 projectId）、
    `refreshTitle`（答完后让宿主按回答给卡片起名）、`renameCard`（手动改名）、
    `exportZip`/`listBackups`/`restoreBackup`、`checkFresh`（focus/visibility 比对 revision，多标签页自动同步）
-   <!-- 数学渲染在 markdown 段：`$…$` / `$$…$$` → `mathHtml()` 轻量 TeX 子集（分数、上下标、希腊字母、\mathcal/\mathbb 映射、HTML 转义） -->
+   <!-- 数学渲染在 markdown 段：`$…$` / `$$…$$` → `mathHtml()`；优先用 vendored KaTeX（`ensureKatex()` 通过
+        `/assets/*` 懒加载 JS + CSS，加载完成后 patch 一次触发重渲染），KaTeX 不可用时退回内置轻量 TeX 子集
+        （分数、上下标、希腊字母、\mathcal/\mathbb 映射、HTML 转义） -->
 4. 模块级 `services.layout` / `goToPanel()` / `goToConversation()` / `remountConversation()`
 5. CSS 模板串（只用 `--dsw-alias-*` token）
 6. 图标 `svg()` + `Glyph*`，`Menu`，`ModelPicker`，`EffortPicker`
@@ -230,7 +234,7 @@ client 侧还有一层 rAF 合并（`streamPending` + `streamFrame`），一帧�
    `Detail`（追问线程、引用区、partial 与「继续」、上下文徽标、`重答 ▾`、「改名」「脱离父级」）/
    `Composer`（模式胶囊菜单 `↳ 深入 ▾`，方向记在 localStorage）/ `TreeComposer`（会话输入框接管）/
    `Root`（搜索 + `/` `↑↓` `Del` 键盘导航、导出/导入 ZIP、备份恢复弹层、脱离确认弹层、删除撤销、
-   Escape 关闭顺序、错误/通知 toast）
+   Escape 关闭顺序、错误/通知 toast、右侧阅读列的拖宽抓手 `.ct-read-handle`，宽度写 `--ct-read-width`）
 8. `apply(ctx)`：注册三个座位 + 返回 disposer
 
 ## 7. 改动指引

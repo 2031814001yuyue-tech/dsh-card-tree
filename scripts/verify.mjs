@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -102,6 +102,19 @@ check('shipped docs', () => {
   assert(pkg.files.includes('docs/preview-overview.png'), 'files must ship docs/preview-overview.png');
   assert(pkg.files.includes('scripts/install.ps1'), 'files must ship scripts/install.ps1');
   return 'INSTALL.md + LICENSE + USAGE.md + previews + install.ps1';
+});
+
+check('math assets', () => {
+  // KaTeX is vendored so answers typeset offline; the routes and the npm files list
+  // both depend on these exact paths.
+  for (const entry of ['vendor/katex/katex.min.js', 'vendor/katex/katex.min.css', 'vendor/katex/LICENSE']) {
+    assert(existsSync(join(root, entry)), entry + ' missing');
+  }
+  const fonts = readdirSync(join(root, 'vendor/katex/fonts')).filter((name) => name.endsWith('.woff2'));
+  assert(fonts.length >= 15, 'expected the KaTeX woff2 fonts, found ' + fonts.length);
+  assert(pkg.files.includes('vendor/katex/katex.min.js'), 'files must ship the KaTeX script');
+  assert(pkg.files.includes('vendor/katex/fonts/*.woff2'), 'files must ship the KaTeX fonts');
+  return fonts.length + ' woff2 fonts, ' + pkg.version;
 });
 
 check('generic sources', () => {

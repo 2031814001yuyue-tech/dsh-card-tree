@@ -12,8 +12,46 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
+import { fileURLToPath } from 'node:url';
 
 const ROUTE_PREFIX = '/dsh-card-tree';
+
+/* KaTeX ships with the bundle so the client can typeset math without a CDN. */
+const ASSET_TYPES = new Map([
+  ['.js', 'text/javascript; charset=utf-8'],
+  ['.css', 'text/css; charset=utf-8'],
+  ['.woff2', 'font/woff2'],
+  ['.json', 'application/json; charset=utf-8'],
+]);
+
+function assetDir() {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'katex');
+}
+
+/**
+ * Serve one file from vendor/katex. Only plain relative names are accepted, so a
+ * crafted path cannot walk out of the bundle directory.
+ */
+function serveAsset(res, requested) {
+  const name = String(requested || '').replace(/\\/g, '/');
+  if (!name || name.startsWith('/') || name.split('/').some((part) => part === '..' || part === '')) {
+    return sendJson(res, 400, { ok: false, error: '非法的资源路径' });
+  }
+  const type = ASSET_TYPES.get(path.extname(name).toLowerCase());
+  if (!type) return sendJson(res, 404, { ok: false, error: '不支持的资源类型' });
+  let body;
+  try {
+    body = fs.readFileSync(path.join(assetDir(), name));
+  } catch (error) {
+    return sendJson(res, 404, { ok: false, error: '资源不存在' });
+  }
+  res.writeHead(200, {
+    'Content-Type': type,
+    'Content-Length': body.length,
+    'Cache-Control': 'public, max-age=86400',
+  });
+  return res.end(body);
+}
 const STATE_VERSION = 1;
 const MAX_CHAIN = 200;
 const MAX_TOOL_ROUNDS = 6;
@@ -2140,6 +2178,10 @@ async function projectImportBundle(ctx, state, body) {
 async function handleRequest(ctx, state, controllers, req, res) {
   const url = new URL(req.url || '/', 'http://127.0.0.1');
   const route = url.pathname.slice(ROUTE_PREFIX.length) || '/';
+
+  if (req.method === 'GET' && route.startsWith('/assets/')) {
+    return serveAsset(res, route.slice('/assets/'.length));
+  }
 
   if (req.method === 'GET' && (route === '/state' || route === '/')) {
     return sendJson(res, 200, snapshot(ctx, state));
